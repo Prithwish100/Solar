@@ -1,0 +1,6 @@
+{
+  "name": "SOLAR",
+  "description": "Production-grade native Android music streaming & local audio player with discovery, synchronized lyrics, equalizer, and cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

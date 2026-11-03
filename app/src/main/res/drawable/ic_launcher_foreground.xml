@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Solar Corona Ring -->
+    <path
+        android:fillColor="#D35400"
+        android:pathData="M54,24A30,30 0,1 1,24 54A30,30 0,0 1,54 24M54,28.5A25.5,25.5 0,1 0,79.5 54A25.5,25.5 0,0 0,54 28.5Z" />
+    <!-- Inner Solar Core Disc -->
+    <path
+        android:fillColor="#FF6B1A"
+        android:pathData="M54,33A21,21 0,1 1,33 54A21,21 0,0 1,54 33Z" />
+    <!-- Eclipse Crescent Shadow -->
+    <path
+        android:fillColor="#080808"
+        android:pathData="M58,35A17,17 0,1 1,41 52A17,17 0,0 1,58 35Z" />
+    <!-- Equalizer / Soundwave Bars in Warm Amber -->
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M43,48h3.5v12h-3.5zM49,42h3.5v24h-3.5zM55,38h3.5v32h-3.5zM61,44h3.5v20h-3.5zM67,49h3.5v10h-3.5z" />
+</vector>

@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">SOLAR</string>
+    <string name="developer_credit">Made by Prithwish</string>
+    <string name="press_back_again_to_exit">Press back again to exit</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="continue_as_guest">Continue in Guest Mode</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_explore">Explore</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_library">Library</string>
+</resources>

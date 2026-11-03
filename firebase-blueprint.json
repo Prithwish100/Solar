@@ -1,0 +1,207 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and cloud-synced preferences in SOLAR.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated user UID."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name."
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address."
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "User profile photo URL."
+        },
+        "preferredAudioQuality": {
+          "type": "string",
+          "enum": ["LOW", "NORMAL", "HIGH", "LOSSLESS"],
+          "description": "Preferred streaming audio quality."
+        },
+        "amoledDarkTheme": {
+          "type": "boolean",
+          "description": "Whether deep black (#080808) AMOLED theme is active."
+        },
+        "ytMusicConnected": {
+          "type": "boolean",
+          "description": "Whether YouTube Music library import is connected."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": ["userId", "displayName", "preferredAudioQuality", "amoledDarkTheme", "ytMusicConnected", "createdAt", "updatedAt"]
+    },
+    "LikedSong": {
+      "title": "LikedSong",
+      "description": "A track favorited by the user and synchronized across devices.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID."
+        },
+        "trackId": {
+          "type": "string",
+          "description": "Unique track identifier."
+        },
+        "title": {
+          "type": "string",
+          "description": "Song title."
+        },
+        "artist": {
+          "type": "string",
+          "description": "Artist name."
+        },
+        "album": {
+          "type": "string",
+          "description": "Album title."
+        },
+        "artworkUrl": {
+          "type": "string",
+          "description": "Album cover URL."
+        },
+        "streamUrl": {
+          "type": "string",
+          "description": "Audio stream URL."
+        },
+        "durationMs": {
+          "type": "integer",
+          "description": "Duration in milliseconds."
+        },
+        "sourceProvider": {
+          "type": "string",
+          "description": "Music provider identifier."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when liked."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when updated."
+        }
+      },
+      "required": ["userId", "trackId", "title", "artist", "album", "artworkUrl", "streamUrl", "durationMs", "sourceProvider", "createdAt", "updatedAt"]
+    },
+    "CloudPlaylist": {
+      "title": "CloudPlaylist",
+      "description": "User-created or imported playlist synchronized in Firestore.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID."
+        },
+        "name": {
+          "type": "string",
+          "description": "Playlist title."
+        },
+        "description": {
+          "type": "string",
+          "description": "Playlist description."
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Whether playlist is publicly shareable."
+        },
+        "trackCount": {
+          "type": "integer",
+          "description": "Number of tracks in the playlist."
+        },
+        "sourceOrigin": {
+          "type": "string",
+          "description": "Origin of the playlist (SOLAR, YOUTUBE_MUSIC, JIOSAAVN, M3U)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of update."
+        }
+      },
+      "required": ["userId", "name", "description", "isPublic", "trackCount", "sourceOrigin", "createdAt", "updatedAt"]
+    },
+    "ListeningHistory": {
+      "title": "ListeningHistory",
+      "description": "Cloud-synced listening history record.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID."
+        },
+        "trackId": {
+          "type": "string",
+          "description": "Track identifier."
+        },
+        "title": {
+          "type": "string",
+          "description": "Track title."
+        },
+        "artist": {
+          "type": "string",
+          "description": "Artist name."
+        },
+        "durationMs": {
+          "type": "integer",
+          "description": "Track duration in ms."
+        },
+        "sourceProvider": {
+          "type": "string",
+          "description": "Provider source."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when played."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when updated."
+        }
+      },
+      "required": ["userId", "trackId", "title", "artist", "durationMs", "sourceProvider", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile document and cloud preferences."
+    },
+    "/users/{userId}/liked_songs/{songId}": {
+      "schema": { "$ref": "#/entities/LikedSong" },
+      "description": "User's cloud-synced liked songs."
+    },
+    "/users/{userId}/playlists/{playlistId}": {
+      "schema": { "$ref": "#/entities/CloudPlaylist" },
+      "description": "User's cloud-synced playlists."
+    },
+    "/users/{userId}/listening_history/{historyId}": {
+      "schema": { "$ref": "#/entities/ListeningHistory" },
+      "description": "User's cloud-synced listening history."
+    }
+  }
+}

@@ -1,0 +1,172 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity Validation Helpers
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+             (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 120)) &&
+             (!('avatarUrl' in data) || data.avatarUrl == null || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+             data.preferredAudioQuality is string &&
+             data.preferredAudioQuality in ['LOW', 'NORMAL', 'HIGH', 'LOSSLESS'] &&
+             data.amoledDarkTheme is bool &&
+             data.ytMusicConnected is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidLikedSong(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.trackId is string && data.trackId.size() >= 1 && data.trackId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.artist is string && data.artist.size() >= 1 && data.artist.size() <= 200 &&
+             data.album is string && data.album.size() <= 200 &&
+             data.artworkUrl is string && data.artworkUrl.size() <= 600 &&
+             data.streamUrl is string && data.streamUrl.size() <= 600 &&
+             data.durationMs is int && data.durationMs >= 0 && data.durationMs <= 86400000 &&
+             data.sourceProvider is string && data.sourceProvider.size() >= 1 && data.sourceProvider.size() <= 50 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCloudPlaylist(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+             data.description is string && data.description.size() <= 400 &&
+             data.isPublic is bool &&
+             data.trackCount is int && data.trackCount >= 0 && data.trackCount <= 10000 &&
+             data.sourceOrigin is string && data.sourceOrigin in ['SOLAR', 'YOUTUBE_MUSIC', 'JIOSAAVN', 'M3U'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidHistoryEntry(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.trackId is string && data.trackId.size() >= 1 && data.trackId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.artist is string && data.artist.size() >= 1 && data.artist.size() <= 200 &&
+             data.durationMs is int && data.durationMs >= 0 && data.durationMs <= 86400000 &&
+             data.sourceProvider is string && data.sourceProvider.size() >= 1 && data.sourceProvider.size() <= 50 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // 1. User Profile Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'preferredAudioQuality', 'amoledDarkTheme', 'ytMusicConnected', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'avatarUrl', 'preferredAudioQuality', 'amoledDarkTheme', 'ytMusicConnected', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming());
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'avatarUrl', 'preferredAudioQuality', 'amoledDarkTheme', 'ytMusicConnected', 'updatedAt']);
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      // 2. Liked Songs Subcollection
+      match /liked_songs/{songId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(songId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(songId) &&
+                         incoming().keys().hasAll(['userId', 'trackId', 'title', 'artist', 'album', 'artworkUrl', 'streamUrl', 'durationMs', 'sourceProvider', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'trackId', 'title', 'artist', 'album', 'artworkUrl', 'streamUrl', 'durationMs', 'sourceProvider', 'createdAt', 'updatedAt']) &&
+                         isValidLikedSong(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(songId) &&
+                         isValidLikedSong(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'artist', 'album', 'artworkUrl', 'streamUrl', 'durationMs', 'sourceProvider', 'updatedAt']);
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(songId);
+      }
+
+      // 3. Cloud Playlists Subcollection
+      match /playlists/{playlistId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(playlistId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(playlistId) &&
+                         incoming().keys().hasAll(['userId', 'name', 'description', 'isPublic', 'trackCount', 'sourceOrigin', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'name', 'description', 'isPublic', 'trackCount', 'sourceOrigin', 'createdAt', 'updatedAt']) &&
+                         isValidCloudPlaylist(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(playlistId) &&
+                         isValidCloudPlaylist(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'isPublic', 'trackCount', 'sourceOrigin', 'updatedAt']);
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(playlistId);
+      }
+
+      // 4. Listening History Subcollection
+      match /listening_history/{historyId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(historyId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(historyId) &&
+                         incoming().keys().hasAll(['userId', 'trackId', 'title', 'artist', 'durationMs', 'sourceProvider', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'trackId', 'title', 'artist', 'durationMs', 'sourceProvider', 'createdAt', 'updatedAt']) &&
+                         isValidHistoryEntry(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(historyId) &&
+                         isValidHistoryEntry(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'artist', 'durationMs', 'sourceProvider', 'updatedAt']);
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(historyId);
+      }
+    }
+  }
+}
