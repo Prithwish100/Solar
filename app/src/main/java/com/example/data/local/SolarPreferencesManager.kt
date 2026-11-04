@@ -37,7 +37,9 @@ data class SolarAppSettings(
     val eqEnabled: Boolean = true,
     val eqPreset: String = "Solar Warmth",
     val bassBoostPercent: Int = 35,
-    val virtualizerPercent: Int = 25
+    val virtualizerPercent: Int = 25,
+    val userName: String = "",
+    val hasPromptedForName: Boolean = false
 )
 
 class SolarPreferencesManager(private val context: Context) {
@@ -65,6 +67,8 @@ class SolarPreferencesManager(private val context: Context) {
         val EQ_PRESET = stringPreferencesKey("eq_preset")
         val BASS_BOOST = intPreferencesKey("bass_boost")
         val VIRTUALIZER = intPreferencesKey("virtualizer")
+        val USER_NAME = stringPreferencesKey("user_name")
+        val HAS_PROMPTED_NAME = booleanPreferencesKey("has_prompted_name")
     }
 
     val settingsFlow: Flow<SolarAppSettings> = context.solarDataStore.data.map { prefs ->
@@ -96,7 +100,9 @@ class SolarPreferencesManager(private val context: Context) {
             eqEnabled = prefs[Keys.EQ_ENABLED] ?: true,
             eqPreset = prefs[Keys.EQ_PRESET] ?: "Solar Warmth",
             bassBoostPercent = prefs[Keys.BASS_BOOST] ?: 35,
-            virtualizerPercent = prefs[Keys.VIRTUALIZER] ?: 25
+            virtualizerPercent = prefs[Keys.VIRTUALIZER] ?: 25,
+            userName = prefs[Keys.USER_NAME] ?: "",
+            hasPromptedForName = prefs[Keys.HAS_PROMPTED_NAME] ?: false
         )
     }
 
@@ -178,5 +184,13 @@ class SolarPreferencesManager(private val context: Context) {
             it[Keys.BASS_BOOST] = bassBoost
             it[Keys.VIRTUALIZER] = virtualizer
         }
+    }
+
+    suspend fun setUserName(name: String) {
+        context.solarDataStore.edit { it[Keys.USER_NAME] = name }
+    }
+
+    suspend fun setHasPromptedForName(prompted: Boolean) {
+        context.solarDataStore.edit { it[Keys.HAS_PROMPTED_NAME] = prompted }
     }
 }

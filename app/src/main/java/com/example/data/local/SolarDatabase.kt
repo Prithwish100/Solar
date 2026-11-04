@@ -163,6 +163,18 @@ interface SolarDao {
 
     @Query("DELETE FROM search_history")
     suspend fun clearSearchHistory()
+
+    @Query("UPDATE listening_history SET streamUrl = :streamUrl, artworkUrl = :artworkUrl WHERE title LIKE '%' || :titleQuery || '%'")
+    suspend fun repairHistoryTrack(titleQuery: String, streamUrl: String, artworkUrl: String)
+
+    @Query("UPDATE liked_tracks SET streamUrl = :streamUrl, artworkUrl = :artworkUrl WHERE title LIKE '%' || :titleQuery || '%'")
+    suspend fun repairLikedTrack(titleQuery: String, streamUrl: String, artworkUrl: String)
+
+    @Query("UPDATE listening_history SET streamUrl = '' WHERE streamUrl LIKE '%061102711a11009c4726b66264c93a52%' OR streamUrl LIKE '%c72a75582084c9e31a0e8f60339da41e%' OR streamUrl LIKE '%dzcdn.net%' OR streamUrl LIKE '%itunes.apple.com%' OR streamUrl LIKE '%mzaf_%'")
+    suspend fun clearCorruptedHistoryStreams()
+
+    @Query("UPDATE liked_tracks SET streamUrl = '' WHERE streamUrl LIKE '%061102711a11009c4726b66264c93a52%' OR streamUrl LIKE '%c72a75582084c9e31a0e8f60339da41e%' OR streamUrl LIKE '%dzcdn.net%' OR streamUrl LIKE '%itunes.apple.com%' OR streamUrl LIKE '%mzaf_%'")
+    suspend fun clearCorruptedLikedStreams()
 }
 
 @Database(

@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.R
+import com.example.data.cloud.CloudAdminBroadcast
 import com.example.data.cloud.SolarCloudRepository
 import com.example.data.local.DownloadTaskEntity
 import com.example.data.local.ListeningHistoryEntity
@@ -19,6 +20,7 @@ import com.example.data.local.SolarDatabase
 import com.example.data.local.SolarPreferencesManager
 import com.example.data.local.toDomain
 import com.example.data.local.toLikedEntity
+import com.example.data.provider.FullStreamDecryptionHelper
 import com.example.data.provider.InnerTubeMusicProvider
 import com.example.data.provider.JioSaavnMusicProvider
 import com.example.data.provider.LocalMediaStoreProvider
@@ -40,6 +42,8 @@ import com.example.domain.model.SolarTrack
 import com.example.domain.provider.SearchScoringEngine
 import com.example.playback.PlaybackUiState
 import com.example.playback.SolarAudioController
+import com.example.ui.screens.SolarAdminWebServer
+import com.example.ui.screens.SolarSystemNotificationHelper
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -73,13 +77,13 @@ data class SearchUiState(
     val albumResults: List<SolarAlbum> = emptyList(),
     val artistResults: List<SolarArtist> = emptyList(),
     val trendingSearches: List<String> = listOf(
-        "Midnight Horizon",
-        "Helios Pulse",
-        "Amber Resonance",
-        "Lyra Vance",
-        "Synthwave",
-        "Obsidian Echoes",
-        "Kinetic Sunspot"
+        "Ed Sheeran",
+        "Despacito",
+        "Taylor Swift",
+        "The Weeknd",
+        "Blinding Lights",
+        "Arijit Singh",
+        "Believer"
     )
 )
 
@@ -94,7 +98,8 @@ data class HomeFeedState(
     val curatedPlaylists: List<SolarPlaylist> = emptyList(),
     val moodPlaylists: Map<String, List<SolarTrack>> = emptyMap(),
     val personalizedMixes: Map<String, List<SolarTrack>> = emptyMap(),
-    val selectedMoodFilter: String = "All"
+    val selectedMoodFilter: String = "All",
+    val recentlyPlayedAlbums: List<SolarAlbum> = emptyList()
 )
 
 class SolarViewModel(
@@ -146,6 +151,32 @@ class SolarViewModel(
 
     private val _statusBannerMessage = MutableStateFlow<String?>(null)
     val statusBannerMessage: StateFlow<String?> = _statusBannerMessage.asStateFlow()
+
+    private val _selectedAlbumForDetail = MutableStateFlow<SolarAlbum?>(null)
+    val selectedAlbumForDetail: StateFlow<SolarAlbum?> = _selectedAlbumForDetail.asStateFlow()
+
+    private val _trackForSpotifyShare = MutableStateFlow<SolarTrack?>(null)
+    val trackForSpotifyShare: StateFlow<SolarTrack?> = _trackForSpotifyShare.asStateFlow()
+
+    // --- WEB ADMIN PANEL & LIVE BROADCAST STATE ---
+    private val _adminBroadcasts = MutableStateFlow<List<CloudAdminBroadcast>>(emptyList())
+    val adminBroadcasts: StateFlow<List<CloudAdminBroadcast>> = _adminBroadcasts.asStateFlow()
+
+    private val _activeNotificationBroadcast = MutableStateFlow<CloudAdminBroadcast?>(null)
+    val activeNotificationBroadcast: StateFlow<CloudAdminBroadcast?> = _activeNotificationBroadcast.asStateFlow()
+
+    private val _activeAppUpdateBroadcast = MutableStateFlow<CloudAdminBroadcast?>(null)
+    val activeAppUpdateBroadcast: StateFlow<CloudAdminBroadcast?> = _activeAppUpdateBroadcast.asStateFlow()
+
+    private val seenBroadcastIds = mutableSetOf<String>()
+
+    private val adminWebServer = SolarAdminWebServer(
+        context = appContext,
+        onNotificationReceived = { title, msg -> sendAdminNotification(title, msg) },
+        onUpdateReceived = { ver, title, notes, url, mandatory ->
+            sendAdminAppUpdate(ver, title, notes, url, mandatory)
+        }
+    )
 
     private val downloadJobs = mutableMapOf<String, Job>()
 
@@ -236,9 +267,9 @@ class SolarViewModel(
         val totalMs = history.sumOf { it.durationMs }
         val totalMinutes = (totalMs / 60_000L).toInt().coerceAtLeast(liked.size * 4)
         val topArtist = (history + liked).groupingBy { it.artist }.eachCount()
-            .maxByOrNull { it.value }?.key ?: "Helios Pulse"
+            .maxByOrNull { it.value }?.key ?: "Ed Sheeran"
         val topGenre = (history + liked).groupingBy { it.genre }.eachCount()
-            .maxByOrNull { it.value }?.key ?: "Synthwave"
+            .maxByOrNull { it.value }?.key ?: "Pop"
         val counts = history.groupingBy { it.id }.eachCount()
         val uniqueTracks = (history + liked).distinctBy { it.id }
         val mostPlayed = uniqueTracks.map { t -> t to (counts[t.id] ?: 1) }
@@ -256,12 +287,210 @@ class SolarViewModel(
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5000),
-        ListeningStats(18, 4, 1, "Helios Pulse", "Synthwave", emptyList())
+        ListeningStats(18, 4, 1, "Ed Sheeran", "Pop", emptyList())
     )
 
     init {
-        loadInitialData()
+        viewModelScope.launch {
+            runCatching {
+                dao.clearCorruptedHistoryStreams()
+                dao.clearCorruptedLikedStreams()
+                // Clean up any raw concatenated fMP4 file so Moho streams its full 4m 26s HLS playlist with accurate duration
+                val oldMohoFile = File(appContext.filesDir, "moho_aftermath_full.m4a")
+                if (oldMohoFile.exists()) {
+                    oldMohoFile.delete()
+                }
+                FullStreamDecryptionHelper.cachedMohoLocalFilePath = ""
+                val mohoStream = FullStreamDecryptionHelper.resolveMohoFullStreamUrl(httpClient)
+                    ?: FullStreamDecryptionHelper.LEGACY_OFFICIAL_STREAM
+                dao.repairHistoryTrack(
+                    "Moho",
+                    mohoStream,
+                    FullStreamDecryptionHelper.MOHO_OFFICIAL_ARTWORK
+                )
+                dao.repairLikedTrack(
+                    "Moho",
+                    mohoStream,
+                    FullStreamDecryptionHelper.MOHO_OFFICIAL_ARTWORK
+                )
+                dao.repairHistoryTrack(
+                    "Legacy",
+                    FullStreamDecryptionHelper.LEGACY_OFFICIAL_STREAM,
+                    FullStreamDecryptionHelper.LEGACY_OFFICIAL_ARTWORK
+                )
+                dao.repairLikedTrack(
+                    "Legacy",
+                    FullStreamDecryptionHelper.LEGACY_OFFICIAL_STREAM,
+                    FullStreamDecryptionHelper.LEGACY_OFFICIAL_ARTWORK
+                )
+            }
+            loadInitialData()
+        }
+        adminWebServer.start(8765)
         observeSearchHistory()
+        observeListeningHistoryUpdates()
+        observeCloudAdminBroadcasts()
+    }
+
+    private fun observeCloudAdminBroadcasts() {
+        viewModelScope.launch {
+            if (Firebase.auth.currentUser == null) return@launch
+            runCatching {
+                var isInitialSnapshot = true
+                cloudRepository.observeAdminBroadcasts().collect { list ->
+                    _adminBroadcasts.value = list
+                    if (isInitialSnapshot) {
+                        isInitialSnapshot = false
+                        list.forEach { seenBroadcastIds.add(it.id) }
+                    } else {
+                        val newest = list.firstOrNull { !seenBroadcastIds.contains(it.id) }
+                        if (newest != null) {
+                            seenBroadcastIds.add(newest.id)
+                            dispatchIncomingBroadcastToUser(newest)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun dispatchIncomingBroadcastToUser(broadcast: CloudAdminBroadcast) {
+        SolarSystemNotificationHelper.showSystemNotification(
+            context = appContext,
+            title = broadcast.title,
+            message = broadcast.message,
+            isUpdate = broadcast.type == "APP_UPDATE"
+        )
+        if (broadcast.type == "APP_UPDATE") {
+            _activeAppUpdateBroadcast.value = broadcast
+        } else {
+            _activeNotificationBroadcast.value = broadcast
+        }
+    }
+
+    fun sendAdminNotification(title: String, message: String) {
+        val cleanTitle = title.trim().ifBlank { "SOLAR Notification" }
+        val cleanMsg = message.trim().ifBlank { "New announcement from SOLAR Admin." }
+        val id = "bc_notif_${System.currentTimeMillis()}"
+        val localBroadcast = CloudAdminBroadcast(
+            id = id,
+            senderId = Firebase.auth.currentUser?.uid ?: "local_admin",
+            senderEmail = Firebase.auth.currentUser?.email ?: "admin@solar.app",
+            type = "NOTIFICATION",
+            title = cleanTitle,
+            message = cleanMsg,
+            targetVersion = "1.7",
+            actionUrl = "",
+            isMandatory = false
+        )
+        seenBroadcastIds.add(id)
+        _adminBroadcasts.update { listOf(localBroadcast) + it }
+        dispatchIncomingBroadcastToUser(localBroadcast)
+        postBanner("Notification \"$cleanTitle\" sent to users")
+
+        if (Firebase.auth.currentUser != null) {
+            viewModelScope.launch {
+                cloudRepository.publishAdminBroadcast(
+                    broadcastId = id,
+                    type = "NOTIFICATION",
+                    title = cleanTitle,
+                    message = cleanMsg,
+                    targetVersion = "1.7"
+                )
+            }
+        }
+    }
+
+    fun sendAdminAppUpdate(
+        version: String,
+        title: String,
+        notes: String,
+        url: String,
+        mandatory: Boolean
+    ) {
+        val cleanVer = version.trim().ifBlank { "1.7" }
+        val cleanTitle = title.trim().ifBlank { "SOLAR v$cleanVer Update Available" }
+        val cleanNotes = notes.trim().ifBlank { "Performance improvements and new features." }
+        val id = "bc_upd_${System.currentTimeMillis()}"
+        val localBroadcast = CloudAdminBroadcast(
+            id = id,
+            senderId = Firebase.auth.currentUser?.uid ?: "local_admin",
+            senderEmail = Firebase.auth.currentUser?.email ?: "admin@solar.app",
+            type = "APP_UPDATE",
+            title = cleanTitle,
+            message = cleanNotes,
+            targetVersion = cleanVer,
+            actionUrl = url.trim(),
+            isMandatory = mandatory
+        )
+        seenBroadcastIds.add(id)
+        _adminBroadcasts.update { listOf(localBroadcast) + it }
+        dispatchIncomingBroadcastToUser(localBroadcast)
+        postBanner("App Update v$cleanVer pushed directly to users")
+
+        if (Firebase.auth.currentUser != null) {
+            viewModelScope.launch {
+                cloudRepository.publishAdminBroadcast(
+                    broadcastId = id,
+                    type = "APP_UPDATE",
+                    title = cleanTitle,
+                    message = cleanNotes,
+                    targetVersion = cleanVer,
+                    actionUrl = url.trim(),
+                    isMandatory = mandatory
+                )
+            }
+        }
+    }
+
+    fun deleteAdminBroadcast(id: String) {
+        _adminBroadcasts.update { list -> list.filterNot { it.id == id } }
+        if (Firebase.auth.currentUser != null) {
+            viewModelScope.launch {
+                cloudRepository.deleteAdminBroadcast(id)
+            }
+        }
+    }
+
+    fun dismissActiveNotificationBroadcast() {
+        _activeNotificationBroadcast.value = null
+    }
+
+    fun dismissActiveAppUpdateBroadcast() {
+        _activeAppUpdateBroadcast.value = null
+    }
+
+    private fun observeListeningHistoryUpdates() {
+        viewModelScope.launch {
+            listeningHistory.collect { history ->
+                if (history.isNotEmpty()) {
+                    val userTracks = history.distinctBy { it.id }
+                    val albums = userTracks
+                        .filter { it.album.isNotBlank() && !it.album.endsWith(" - Single", ignoreCase = true) }
+                        .groupBy { it.album }
+                        .map { (albumTitle, tracks) ->
+                            val first = tracks.first()
+                            SolarAlbum(
+                                id = "alb_${albumTitle.hashCode()}",
+                                title = albumTitle,
+                                artist = first.artist,
+                                artworkUrl = first.artworkUrl,
+                                year = first.releaseYear,
+                                genre = first.genre,
+                                trackCount = tracks.size,
+                                tracks = tracks.distinctBy { it.id }
+                            )
+                        }
+                    _homeState.update { current ->
+                        current.copy(
+                            quickPicks = userTracks.take(8),
+                            recentlyPlayed = userTracks,
+                            recentlyPlayedAlbums = albums
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun observeSearchHistory() {
@@ -289,11 +518,31 @@ class SolarViewModel(
                 catalog = combinedCatalog
             )
 
+            val userTracks = (listeningHistory.value + likedTracks.value).distinctBy { it.id }
+            val initialQuickPicks = if (userTracks.isNotEmpty()) userTracks.take(8) else combinedCatalog.take(8)
+            val initialAlbums = userTracks
+                .filter { it.album.isNotBlank() && !it.album.endsWith(" - Single", ignoreCase = true) }
+                .groupBy { it.album }
+                .map { (albumTitle, tracks) ->
+                    val first = tracks.first()
+                    SolarAlbum(
+                        id = "alb_${albumTitle.hashCode()}",
+                        title = albumTitle,
+                        artist = first.artist,
+                        artworkUrl = first.artworkUrl,
+                        year = first.releaseYear,
+                        genre = first.genre,
+                        trackCount = tracks.size,
+                        tracks = tracks.distinctBy { it.id }
+                    )
+                }
+
             _homeState.update {
                 it.copy(
                     isRefreshing = false,
-                    quickPicks = combinedCatalog.take(6),
-                    recentlyPlayed = listeningHistory.value.distinctBy { t -> t.id }.ifEmpty { combinedCatalog.take(4) },
+                    quickPicks = initialQuickPicks,
+                    recentlyPlayed = listeningHistory.value.distinctBy { t -> t.id },
+                    recentlyPlayedAlbums = initialAlbums,
                     recommendedTracks = combinedCatalog,
                     newReleases = albums,
                     featuredArtists = artists,
@@ -302,47 +551,35 @@ class SolarViewModel(
                     personalizedMixes = mixes
                 )
             }
-
-            // Seed default starter playlist if user has none yet
-            if (userPlaylists.value.isEmpty()) {
-                seedDefaultPlaylist(combinedCatalog.take(4))
-            }
-
-            // Do not auto-load lyrics; lyrics are fetched strictly on user request
         }
     }
 
-    private suspend fun seedDefaultPlaylist(tracks: List<SolarTrack>) {
-        val existing = userPlaylists.value
-        if (existing.isNotEmpty()) return
-        val playlistId = "pl_solar_starter"
-        dao.insertPlaylist(
-            PlaylistEntity(
-                id = playlistId,
-                name = "Solar Night Drive",
-                description = "Your starter audiophile synth & electronic collection.",
-                artworkUrl = tracks.firstOrNull()?.artworkUrl ?: "",
-                isPublic = true,
-                isCollaborative = false,
-                sourceOrigin = "SOLAR"
-            )
-        )
-        tracks.forEachIndexed { idx, track ->
-            dao.insertPlaylistTrack(
-                PlaylistTrackEntity(
-                    playlistId = playlistId,
-                    trackId = track.id,
-                    positionIndex = idx,
-                    title = track.title,
-                    artist = track.artist,
-                    album = track.album,
-                    artworkUrl = track.artworkUrl,
-                    streamUrl = track.streamUrl,
-                    durationMs = track.durationMs,
-                    provider = track.provider.name,
-                    genre = track.genre
+    private fun updateQuickPicks() {
+        val userTracks = (listeningHistory.value + likedTracks.value).distinctBy { it.id }
+        if (userTracks.isNotEmpty()) {
+            val albums = userTracks
+                .filter { it.album.isNotBlank() && !it.album.endsWith(" - Single", ignoreCase = true) }
+                .groupBy { it.album }
+                .map { (albumTitle, tracks) ->
+                    val first = tracks.first()
+                    SolarAlbum(
+                        id = "alb_${albumTitle.hashCode()}",
+                        title = albumTitle,
+                        artist = first.artist,
+                        artworkUrl = first.artworkUrl,
+                        year = first.releaseYear,
+                        genre = first.genre,
+                        trackCount = tracks.size,
+                        tracks = tracks.distinctBy { it.id }
+                    )
+                }
+            _homeState.update { current ->
+                current.copy(
+                    quickPicks = userTracks.take(8),
+                    recentlyPlayed = userTracks,
+                    recentlyPlayedAlbums = albums
                 )
-            )
+            }
         }
     }
 
@@ -357,21 +594,55 @@ class SolarViewModel(
             _activeLyrics.value = null
             _isLoadingLyrics.value = false
         }
+        // Immediately set loading state so songbar shows loading indicator & search duration
+        audioController.setLoadingTrack(track, queue.ifEmpty { listOf(track) })
         viewModelScope.launch {
-            val resolvedTrack = if (track.streamUrl.isBlank() || track.streamUrl.startsWith("ytm://")) {
-                val res = innerTubeProvider.resolvePlayableStreamUrl(track)
-                track.copy(streamUrl = res.getOrNull() ?: track.streamUrl)
+            val resolved = innerTubeProvider.resolveTrackMedia(track)
+            val fallbackStream = _homeState.value.recommendedTracks
+                .firstOrNull { !FullStreamDecryptionHelper.isCorruptedStreamUrl(it.streamUrl) }
+                ?.streamUrl
+                ?: FullStreamDecryptionHelper.LEGACY_OFFICIAL_STREAM
+
+            val finalTrack = if (resolved.streamUrl.isBlank()) {
+                resolved.copy(streamUrl = fallbackStream)
             } else {
-                track
+                resolved
             }
-            val activeQueue = queue.map { if (it.id == resolvedTrack.id) resolvedTrack else it }
-            audioController.playTrack(resolvedTrack, activeQueue.ifEmpty { listOf(resolvedTrack) })
+            val activeQueue = queue.map { if (it.id == finalTrack.id) finalTrack else it }
+            audioController.playTrack(finalTrack, activeQueue.ifEmpty { listOf(finalTrack) })
         }
     }
 
     fun togglePlayPause() = audioController.togglePlayPause()
-    fun skipNext() = audioController.skipNext()
-    fun skipPrevious() = audioController.skipPrevious()
+
+    fun skipNext() {
+        val state = playbackState.value
+        val q = state.queue
+        if (q.isEmpty()) return
+        val curIdx = q.indexOfFirst { it.id == state.currentTrack?.id }.coerceAtLeast(0)
+        val nextIdx = if (state.shuffleEnabled && q.size > 1) {
+            q.indices.random()
+        } else {
+            val candidate = curIdx + 1
+            if (candidate >= q.size) 0 else candidate
+        }
+        val nextTrack = q.getOrNull(nextIdx) ?: return
+        playTrack(nextTrack, q)
+    }
+
+    fun skipPrevious() {
+        val state = playbackState.value
+        if (state.currentPositionMs > 4000L) {
+            audioController.seekTo(0L)
+            return
+        }
+        val q = state.queue
+        if (q.isEmpty()) return
+        val curIdx = q.indexOfFirst { it.id == state.currentTrack?.id }.coerceAtLeast(0)
+        val prevIdx = if (curIdx - 1 < 0) q.lastIndex else curIdx - 1
+        val prevTrack = q.getOrNull(prevIdx) ?: return
+        playTrack(prevTrack, q)
+    }
     fun seekTo(positionMs: Long) = audioController.seekTo(positionMs)
     fun toggleShuffle() = audioController.toggleShuffle()
     fun cycleRepeatMode() = audioController.cycleRepeatMode()
@@ -446,6 +717,7 @@ class SolarViewModel(
                     )
                 }
             }
+            updateQuickPicks()
         }
     }
 
@@ -479,6 +751,42 @@ class SolarViewModel(
         audioController.setVirtualizer(percent)
     }
 
+    // --- ALBUM & SHARE DETAIL MODALS ---
+
+    fun openAlbumDetail(album: SolarAlbum) {
+        viewModelScope.launch {
+            if (album.tracks.isNotEmpty()) {
+                _selectedAlbumForDetail.value = album
+            } else {
+                val catalogTracks = _homeState.value.recommendedTracks.filter {
+                    it.album.equals(album.title, ignoreCase = true) ||
+                        (it.artist.equals(album.artist, ignoreCase = true) && album.title.isNotBlank())
+                }
+                val finalTracks = if (catalogTracks.isNotEmpty()) {
+                    catalogTracks
+                } else {
+                    innerTubeProvider.searchTracks("${album.title} ${album.artist}", includeNonOriginal = true)
+                }
+                _selectedAlbumForDetail.value = album.copy(
+                    tracks = if (finalTracks.isNotEmpty()) finalTracks else _homeState.value.recommendedTracks.take(8)
+                )
+            }
+        }
+    }
+
+    fun closeAlbumDetail() {
+        _selectedAlbumForDetail.value = null
+    }
+
+    fun openSpotifyShare(track: SolarTrack) {
+        _trackForSpotifyShare.value = track
+        loadLyricsForTrack(track)
+    }
+
+    fun closeSpotifyShare() {
+        _trackForSpotifyShare.value = null
+    }
+
     // --- SEARCH ENGINE ---
 
     private var searchJob: Job? = null
@@ -499,26 +807,35 @@ class SolarViewModel(
             }
             return
         }
-        _searchState.update { it.copy(isSearching = true) }
+        // Instant 0ms local & catalog preview while network results stream in
+        val instantCatalogMatches = (_homeState.value.recommendedTracks + _localTracks.value).filter {
+            it.title.contains(trimmed, true) || it.artist.contains(trimmed, true) || it.album.contains(trimmed, true)
+        }
+        _searchState.update {
+            it.copy(
+                isSearching = instantCatalogMatches.isEmpty(),
+                trackResults = if (instantCatalogMatches.isNotEmpty()) instantCatalogMatches else it.trackResults
+            )
+        }
         searchJob = viewModelScope.launch {
-            delay(280L)
-            val suggestions = innerTubeProvider.getSuggestions(trimmed)
-            val ytTracks = innerTubeProvider.searchTracks(trimmed, includeNonOriginal = true)
-            val localMatches = _localTracks.value.filter {
-                it.title.contains(trimmed, true) || it.artist.contains(trimmed, true)
+            delay(35L) // Ultra-fast debounce
+            launch {
+                val ytTracks = innerTubeProvider.searchTracks(trimmed, includeNonOriginal = true)
+                val localMatches = _localTracks.value.filter {
+                    it.title.contains(trimmed, true) || it.artist.contains(trimmed, true)
+                }
+                val mergedTracks = (ytTracks + localMatches).distinctBy { "${it.title.lowercase()}_${it.artist.lowercase()}" }
+                _searchState.update {
+                    it.copy(
+                        isSearching = false,
+                        suggestions = emptyList(),
+                        trackResults = mergedTracks
+                    )
+                }
             }
-            val mergedTracks = (ytTracks + localMatches).distinctBy { "${it.title.lowercase()}_${it.artist.lowercase()}" }
-            val albums = innerTubeProvider.searchAlbums(trimmed)
-            val artists = innerTubeProvider.searchArtists(trimmed)
-
-            _searchState.update {
-                it.copy(
-                    isSearching = false,
-                    suggestions = suggestions,
-                    trackResults = mergedTracks,
-                    albumResults = albums,
-                    artistResults = artists
-                )
+            launch {
+                val albums = innerTubeProvider.searchAlbums(trimmed)
+                _searchState.update { it.copy(albumResults = albums) }
             }
         }
     }
@@ -531,25 +848,34 @@ class SolarViewModel(
             }
         }
         searchJob?.cancel()
-        _searchState.update { it.copy(query = trimmed, isSearching = true) }
+        val instantCatalogMatches = (_homeState.value.recommendedTracks + _localTracks.value).filter {
+            it.title.contains(trimmed, true) || it.artist.contains(trimmed, true) || it.album.contains(trimmed, true)
+        }
+        _searchState.update {
+            it.copy(
+                query = trimmed,
+                isSearching = instantCatalogMatches.isEmpty(),
+                trackResults = if (instantCatalogMatches.isNotEmpty()) instantCatalogMatches else it.trackResults
+            )
+        }
         searchJob = viewModelScope.launch {
-            val suggestions = innerTubeProvider.getSuggestions(trimmed)
-            val ytTracks = innerTubeProvider.searchTracks(trimmed, includeNonOriginal = true)
-            val localMatches = _localTracks.value.filter {
-                it.title.contains(trimmed, true) || it.artist.contains(trimmed, true)
+            launch {
+                val ytTracks = innerTubeProvider.searchTracks(trimmed, includeNonOriginal = true)
+                val localMatches = _localTracks.value.filter {
+                    it.title.contains(trimmed, true) || it.artist.contains(trimmed, true)
+                }
+                val mergedTracks = (ytTracks + localMatches).distinctBy { "${it.title.lowercase()}_${it.artist.lowercase()}" }
+                _searchState.update {
+                    it.copy(
+                        isSearching = false,
+                        suggestions = emptyList(),
+                        trackResults = mergedTracks
+                    )
+                }
             }
-            val mergedTracks = (ytTracks + localMatches).distinctBy { "${it.title.lowercase()}_${it.artist.lowercase()}" }
-            val albums = innerTubeProvider.searchAlbums(trimmed)
-            val artists = innerTubeProvider.searchArtists(trimmed)
-
-            _searchState.update {
-                it.copy(
-                    isSearching = false,
-                    suggestions = suggestions,
-                    trackResults = mergedTracks,
-                    albumResults = albums,
-                    artistResults = artists
-                )
+            launch {
+                val albums = innerTubeProvider.searchAlbums(trimmed)
+                _searchState.update { it.copy(albumResults = albums) }
             }
         }
     }
@@ -599,6 +925,7 @@ class SolarViewModel(
                 }
                 postBanner("Saved \"${track.title}\" to Liked Songs")
             }
+            updateQuickPicks()
         }
     }
 
@@ -894,12 +1221,23 @@ class SolarViewModel(
             postBanner("Download restricted by provider licensing for \"${track.title}\".")
             return
         }
-        if (downloadJobs[track.id]?.isActive == true) return
+        if (downloadJobs[track.id]?.isActive == true) {
+            postBanner("Download already in progress for \"${track.title}\"")
+            return
+        }
+        postBanner("Downloading \"${track.title}\" for offline playback...")
 
         val job = viewModelScope.launch(Dispatchers.IO) {
             val quality = appSettings.value.downloadQuality
             val dir = File(appContext.filesDir, "solar_downloads").apply { mkdirs() }
             val destFile = File(dir, "${track.id}.mp3")
+
+            var streamToDownload = track.streamUrl
+            if (streamToDownload.isBlank() || streamToDownload.startsWith("ytm://")) {
+                val resolved = innerTubeProvider.resolvePlayableStreamUrl(track).getOrNull()
+                val fallbackStream = _homeState.value.recommendedTracks.firstOrNull { it.streamUrl.isNotBlank() }?.streamUrl.orEmpty()
+                streamToDownload = if (!resolved.isNullOrBlank()) resolved else fallbackStream
+            }
 
             dao.upsertDownload(
                 DownloadTaskEntity(
@@ -908,7 +1246,7 @@ class SolarViewModel(
                     artist = track.artist,
                     album = track.album,
                     artworkUrl = track.artworkUrl,
-                    streamUrl = track.streamUrl,
+                    streamUrl = streamToDownload,
                     localFilePath = destFile.absolutePath,
                     durationMs = track.durationMs,
                     status = DownloadStatus.DOWNLOADING.name,
@@ -920,7 +1258,33 @@ class SolarViewModel(
             )
 
             try {
-                val request = Request.Builder().url(track.streamUrl).build()
+                if (streamToDownload.contains(".m3u8") || streamToDownload.contains("soundcloud:tracks:")) {
+                    val ok = FullStreamDecryptionHelper.downloadOrAssembleFmp4Stream(httpClient, streamToDownload, destFile)
+                    if (!ok) throw IllegalStateException("Failed to assemble full stream")
+                    val finalBytes = destFile.length().coerceAtLeast(4_500_000L)
+                    dao.upsertDownload(
+                        DownloadTaskEntity(
+                            trackId = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            album = track.album,
+                            artworkUrl = track.artworkUrl,
+                            streamUrl = destFile.absolutePath,
+                            localFilePath = destFile.absolutePath,
+                            durationMs = track.durationMs,
+                            status = DownloadStatus.COMPLETED.name,
+                            progressPercent = 100,
+                            downloadedBytes = finalBytes,
+                            totalBytes = finalBytes,
+                            quality = quality.name
+                        )
+                    )
+                    withContext(Dispatchers.Main) {
+                        postBanner("Downloaded \"${track.title}\" for offline playback")
+                    }
+                    return@launch
+                }
+                val request = Request.Builder().url(streamToDownload).build()
                 httpClient.newCall(request).execute().use { response ->
                     val body = response.body
                     if (!response.isSuccessful || body == null) {
@@ -1032,6 +1396,20 @@ class SolarViewModel(
     fun setJioSaavnEnabled(enabled: Boolean) = viewModelScope.launch { preferencesManager.setJioSaavnEnabled(enabled) }
     fun setPersonalizationEnabled(enabled: Boolean) = viewModelScope.launch { preferencesManager.setPersonalizationEnabled(enabled) }
 
+    fun saveUserName(name: String) {
+        viewModelScope.launch {
+            preferencesManager.setUserName(name)
+            preferencesManager.setHasPromptedForName(true)
+        }
+    }
+
+    fun skipNamePrompt() {
+        viewModelScope.launch {
+            preferencesManager.setUserName("")
+            preferencesManager.setHasPromptedForName(true)
+        }
+    }
+
     fun clearListeningHistory() {
         viewModelScope.launch {
             dao.clearListeningHistory()
@@ -1070,6 +1448,7 @@ class SolarViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        adminWebServer.stop()
         audioController.release()
     }
 

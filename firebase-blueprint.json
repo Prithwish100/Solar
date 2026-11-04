@@ -184,6 +184,57 @@
         }
       },
       "required": ["userId", "trackId", "title", "artist", "durationMs", "sourceProvider", "createdAt", "updatedAt"]
+    },
+    "AdminBroadcast": {
+      "title": "AdminBroadcast",
+      "description": "Real-time notification or OTA app update pushed from the SOLAR Web Admin Panel to users.",
+      "type": "object",
+      "properties": {
+        "senderId": {
+          "type": "string",
+          "description": "Authenticated UID of the admin who sent the broadcast."
+        },
+        "senderEmail": {
+          "type": "string",
+          "description": "Email of the admin sender."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["NOTIFICATION", "APP_UPDATE"],
+          "description": "Whether this broadcast is a user notification or an app update announcement."
+        },
+        "title": {
+          "type": "string",
+          "description": "Notification or update headline."
+        },
+        "message": {
+          "type": "string",
+          "description": "Notification body or release notes."
+        },
+        "targetVersion": {
+          "type": "string",
+          "description": "App version string for APP_UPDATE broadcasts (e.g. 1.7)."
+        },
+        "actionUrl": {
+          "type": "string",
+          "description": "Optional download link or deep action URL."
+        },
+        "isMandatory": {
+          "type": "boolean",
+          "description": "Whether the app update is marked mandatory."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when broadcast was sent."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when broadcast was last updated."
+        }
+      },
+      "required": ["senderId", "type", "title", "message", "targetVersion", "actionUrl", "isMandatory", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -202,6 +253,10 @@
     "/users/{userId}/listening_history/{historyId}": {
       "schema": { "$ref": "#/entities/ListeningHistory" },
       "description": "User's cloud-synced listening history."
+    },
+    "/broadcasts/{broadcastId}": {
+      "schema": { "$ref": "#/entities/AdminBroadcast" },
+      "description": "Global admin notifications and app updates pushed from the Web Admin Panel."
     }
   }
 }

@@ -62,6 +62,7 @@ import com.example.domain.model.SolarPlaylist
 import com.example.domain.model.SolarTrack
 import com.example.ui.HomeFeedState
 import com.example.ui.components.SolarAlbumCard
+import com.example.ui.components.SolarAnimatedIconButton
 import com.example.ui.components.SolarArtistBubble
 import com.example.ui.components.SolarArtworkBox
 import com.example.ui.components.SolarLogoWithCredit
@@ -94,18 +95,11 @@ fun SolarHomeScreen(
     onAddToPlaylistRequest: (SolarTrack) -> Unit,
     onDownloadTrack: (SolarTrack) -> Unit,
     onNavigateToSearch: () -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onOpenAlbumDetail: (SolarAlbum) -> Unit = {}
 ) {
-    var selectedAlbumDetail by remember { mutableStateOf<SolarAlbum?>(null) }
     var selectedArtistDetail by remember { mutableStateOf<SolarArtist?>(null) }
     var selectedPlaylistDetail by remember { mutableStateOf<SolarPlaylist?>(null) }
-
-    val moodKeys = listOf("All") + homeState.moodPlaylists.keys.toList()
-    val displayedRecommended = if (homeState.selectedMoodFilter == "All") {
-        homeState.recommendedTracks
-    } else {
-        homeState.moodPlaylists[homeState.selectedMoodFilter].orEmpty().ifEmpty { homeState.recommendedTracks }
-    }
 
     LazyColumn(
         modifier = Modifier
@@ -125,7 +119,7 @@ fun SolarHomeScreen(
                 SolarLogoWithCredit(showCredit = true)
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
+                    SolarAnimatedIconButton(
                         onClick = onNavigateToSearch,
                         modifier = Modifier.testTag("home_search_shortcut")
                     ) {
@@ -135,23 +129,13 @@ fun SolarHomeScreen(
                             tint = SolarWhite
                         )
                     }
-                    IconButton(
-                        onClick = onRefresh,
-                        modifier = Modifier.testTag("home_refresh_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh Discovery Feed",
-                            tint = SolarWarmAmber
-                        )
-                    }
-                    IconButton(
+                    SolarAnimatedIconButton(
                         onClick = onNavigateToSettings,
                         modifier = Modifier.testTag("home_settings_btn")
                     ) {
                         Icon(
-                            imageVector = if (isCloudSignedIn) Icons.Default.AccountCircle else Icons.Default.Settings,
-                            contentDescription = "Account & Settings",
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = "Log in",
                             tint = if (isCloudSignedIn) SolarBurntOrange else SolarWhite
                         )
                     }
@@ -183,77 +167,20 @@ fun SolarHomeScreen(
                         .padding(18.dp)
                 ) {
                     Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column {
-                                Text(
-                                    text = "${homeState.greeting}, $userName",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    color = SolarWhite
-                                )
-                                Text(
-                                    text = if (isCloudSignedIn) {
-                                        "Cloud Sync Active • Lossless Audio Engine Ready"
-                                    } else {
-                                        "Local & InnerTube Discovery • Sign in for Cloud Sync"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = SolarWarmAmber
-                                )
-                            }
-                            Button(
-                                onClick = {
-                                    val first = displayedRecommended.firstOrNull()
-                                    if (first != null) onPlayTrack(first, displayedRecommended)
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = SolarBurntOrange),
-                                shape = CircleShape
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = SolarWhite)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Solar Mix", color = SolarWhite)
-                            }
-                        }
+                        val greetingText = if (userName.isNotBlank()) "${homeState.greeting}, $userName" else homeState.greeting
+                        Text(
+                            text = greetingText,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = SolarWhite
+                        )
                     }
                 }
             }
         }
 
-        // 3. Mood & Activity Filter Chips
+        // 3. Quick Picks (2-column compact grid)
         item {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(moodKeys) { mood ->
-                    val selected = homeState.selectedMoodFilter == mood
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onSelectMood(mood) },
-                        label = { Text(mood) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = SolarBurntOrange,
-                            selectedLabelColor = SolarWhite,
-                            containerColor = SolarCardBackground,
-                            labelColor = SolarMutedGrey
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = selected,
-                            borderColor = SolarDivider,
-                            selectedBorderColor = SolarBurntOrange
-                        )
-                    )
-                }
-            }
-        }
-
-        // 4. Quick Picks (2-column compact grid)
-        item {
-            SectionTitle(title = "Quick Picks", subtitle = "Instant official studio masters")
+            SectionTitle(title = "Quick Picks", subtitle = "Hits & your recently listened songs")
             Column(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -306,103 +233,7 @@ fun SolarHomeScreen(
             }
         }
 
-        // 5. Personalized Daily Mixes & Discovery
-        item {
-            SectionTitle(title = "Your Solar Mixes", subtitle = "Personalized from your listening & likes")
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(homeState.personalizedMixes.entries.toList()) { (mixTitle, mixTracks) ->
-                    Card(
-                        modifier = Modifier
-                            .width(210.dp)
-                            .clickable {
-                                val first = mixTracks.firstOrNull()
-                                if (first != null) onPlayTrack(first, mixTracks)
-                            },
-                        colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            SolarArtworkBox(
-                                artworkUrl = mixTracks.firstOrNull()?.artworkUrl ?: "",
-                                contentDescription = mixTitle,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(120.dp),
-                                cornerRadius = 12.dp
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = mixTitle,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = SolarWhite,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = mixTracks.joinToString(", ") { it.artist },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = SolarMutedGrey,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 6. New Releases & Recommended Albums
-        item {
-            SectionTitle(title = "New Releases & Albums", subtitle = "Full-length studio albums")
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(homeState.newReleases) { album ->
-                    SolarAlbumCard(
-                        album = album,
-                        onClick = { selectedAlbumDetail = album }
-                    )
-                }
-            }
-        }
-
-        // 7. Recommended Artists
-        item {
-            SectionTitle(title = "Recommended Artists", subtitle = "Official verified channels & creators")
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(homeState.featuredArtists) { artist ->
-                    SolarArtistBubble(
-                        artist = artist,
-                        onClick = { selectedArtistDetail = artist }
-                    )
-                }
-            }
-        }
-
-        // 8. Popular Curated Playlists
-        item {
-            SectionTitle(title = "Popular Playlists", subtitle = "Hand-crafted for deep listening")
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(homeState.curatedPlaylists) { playlist ->
-                    SolarPlaylistCard(
-                        playlist = playlist,
-                        onClick = { selectedPlaylistDetail = playlist }
-                    )
-                }
-            }
-        }
-
-        // 9. Recently Added Local Device Music (if scanned)
+        // 5. Recently Added Local Device Music (if scanned)
         if (localTracks.isNotEmpty()) {
             item {
                 SectionTitle(title = "Recently Added Local Music", subtitle = "${localTracks.size} device tracks ready offline")
@@ -424,82 +255,32 @@ fun SolarHomeScreen(
             }
         }
 
-        // 10. Recommended Songs Feed
-        item {
-            SectionTitle(
-                title = "Recommended Songs (${homeState.selectedMoodFilter})",
-                subtitle = "Verified official recordings • Zero unofficial edits"
-            )
+        // 5. Recently Listened Albums
+        val displayAlbums = if (homeState.recentlyPlayedAlbums.isNotEmpty()) {
+            homeState.recentlyPlayedAlbums
+        } else {
+            homeState.newReleases
         }
-        items(displayedRecommended, key = { it.id }) { track ->
-            Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                SolarTrackRow(
-                    track = track,
-                    isPlaying = currentPlayingTrack?.id == track.id,
-                    isLiked = likedTrackIds.contains(track.id),
-                    onPlayClick = { onPlayTrack(track, displayedRecommended) },
-                    onLikeClick = { onToggleLike(track) },
-                    onPlayNext = { onPlayNext(track) },
-                    onAddToQueue = { onAddToQueue(track) },
-                    onAddToPlaylist = { onAddToPlaylistRequest(track) },
-                    onDownloadClick = { onDownloadTrack(track) }
-                )
-            }
-        }
-    }
 
-    // Album Detail Modal
-    selectedAlbumDetail?.let { album ->
-        AlertDialog(
-            onDismissRequest = { selectedAlbumDetail = null },
-            containerColor = SolarCardBackground,
-            title = {
-                Text("${album.title} (${album.year})", color = SolarWhite, style = MaterialTheme.typography.titleLarge)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Artist: ${album.artist} • Genre: ${album.genre}", color = SolarWarmAmber)
-                    album.tracks.forEach { t ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(SolarElevatedSurface)
-                                .clickable {
-                                    onPlayTrack(t, album.tracks)
-                                    selectedAlbumDetail = null
-                                }
-                                .padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(t.title, color = SolarWhite, style = MaterialTheme.typography.titleSmall)
-                                Text(t.audioFormat, color = SolarMutedGrey, style = MaterialTheme.typography.labelSmall)
-                            }
-                            Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = SolarBurntOrange)
-                        }
+        if (displayAlbums.isNotEmpty()) {
+            item {
+                SectionTitle(
+                    title = "Recently Listened Albums",
+                    subtitle = "Albums from your listening history and verified artists"
+                )
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    items(displayAlbums, key = { it.id }) { album ->
+                        SolarAlbumCard(
+                            album = album,
+                            onClick = { onOpenAlbumDetail(album) }
+                        )
                     }
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val first = album.tracks.firstOrNull()
-                        if (first != null) onPlayTrack(first, album.tracks)
-                        selectedAlbumDetail = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = SolarBurntOrange)
-                ) {
-                    Text("Play Album", color = SolarWhite)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { selectedAlbumDetail = null }) {
-                    Text("Close", color = SolarMutedGrey)
-                }
             }
-        )
+        }
     }
 
     // Artist Profile Modal
@@ -628,14 +409,14 @@ fun SolarExploreScreen(
     onSelectMoodAndPlay: (String, List<SolarTrack>) -> Unit
 ) {
     val genres = listOf(
-        "Synthwave" to "Analog horizons & neon arpeggios",
-        "Electronic" to "Precision modular soundscapes",
-        "Ambient Techno" to "Deep-focus minimal rhythms",
-        "Progressive House" to "Euphoric melodic builds",
-        "Indie Pop" to "Intimate vocals & dream textures",
-        "Indie Fusion" to "South Asian & global acoustic-electronic",
-        "Drum & Bass" to "174 BPM kinetic breakbeats",
-        "Acoustic" to "Unplugged studio & live sessions"
+        "Pop" to "Global pop chart-toppers & radio hits",
+        "Synthpop" to "80s-inspired retro synth anthems",
+        "Dance Pop" to "High-energy club & disco beats",
+        "Pop Rock" to "Electrifying stadium rock & guitar riffs",
+        "Bollywood Romantic" to "Soulful Indian romantic melodies",
+        "Latin Pop" to "Rhythmic reggaeton & summer party hits",
+        "R&B" to "Smooth contemporary R&B & soul",
+        "Acoustic" to "Unplugged studio & live acoustic sessions"
     )
 
     LazyColumn(

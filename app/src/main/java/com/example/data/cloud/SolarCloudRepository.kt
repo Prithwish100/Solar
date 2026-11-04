@@ -124,6 +124,21 @@ data class CloudHistoryDoc(
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
+@IgnoreExtraProperties
+data class CloudAdminBroadcast(
+    @DocumentId val id: String = "",
+    val senderId: String = "",
+    val senderEmail: String? = null,
+    val type: String = "NOTIFICATION", // "NOTIFICATION" or "APP_UPDATE"
+    val title: String = "",
+    val message: String = "",
+    val targetVersion: String = "1.7",
+    val actionUrl: String = "",
+    val isMandatory: Boolean = false,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
 class SolarCloudRepository(
     private val db: FirebaseFirestore
 ) {
@@ -361,5 +376,74 @@ class SolarCloudRepository(
             handleFirestoreError(e, OperationType.CREATE, docRef.path)
             throw e
         }
+    }
+
+    suspend fun publishAdminBroadcast(
+        broadcastId: String,
+        type: String,
+        title: String,
+        message: String,
+        targetVersion: String = "1.7",
+        actionUrl: String = "",
+        isMandatory: Boolean = false
+    ): Result<String> = runCatching {
+        val uid = requireUserId()
+        val email = auth.currentUser?.email
+        val sanitizedId = broadcastId.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(120).ifBlank { "bc_${System.currentTimeMillis()}" }
+        val docRef = db.collection("broadcasts").document(sanitizedId)
+        try {
+            val validType = if (type in listOf("NOTIFICATION", "APP_UPDATE")) type else "NOTIFICATION"
+            val payload = mutableMapOf<String, Any>(
+                "senderId" to uid,
+                "type" to validType,
+                "title" to title.trim().take(140).ifBlank { "SOLAR Announcement" },
+                "message" to message.trim().take(1000).ifBlank { "New update available in SOLAR." },
+                "targetVersion" to targetVersion.trim().take(30).ifBlank { "1.7" },
+                "actionUrl" to actionUrl.trim().take(600),
+                "isMandatory" to isMandatory,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (!email.isNullOrBlank()) {
+                payload["senderEmail"] = email.take(120)
+            }
+            docRef.set(payload).await()
+            sanitizedId
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            throw e
+        }
+    }
+
+    suspend fun deleteAdminBroadcast(broadcastId: String): Result<Unit> = runCatching {
+        requireUserId()
+        val sanitizedId = broadcastId.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(120)
+        val docRef = db.collection("broadcasts").document(sanitizedId)
+        try {
+            docRef.delete().await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
+            throw e
+        }
+    }
+
+    fun observeAdminBroadcasts(): Flow<List<CloudAdminBroadcast>> = flow {
+        val path = "broadcasts"
+        emitAll(
+            db.collection("broadcasts")
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(CloudAdminBroadcast::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt?.seconds ?: 0L }
+                }
+                .catch { error ->
+                    if (error is Exception) handleFirestoreError(error, OperationType.LIST, path)
+                    throw error
+                }
+        )
     }
 }

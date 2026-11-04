@@ -79,6 +79,19 @@ service cloud.firestore {
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
+    function isValidAdminBroadcast(data) {
+      return data.senderId is string && data.senderId == request.auth.uid &&
+             (!('senderEmail' in data) || data.senderEmail == null || (data.senderEmail is string && data.senderEmail.size() <= 120)) &&
+             data.type is string && data.type in ['NOTIFICATION', 'APP_UPDATE'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 140 &&
+             data.message is string && data.message.size() >= 1 && data.message.size() <= 1000 &&
+             data.targetVersion is string && data.targetVersion.size() >= 1 && data.targetVersion.size() <= 30 &&
+             data.actionUrl is string && data.actionUrl.size() <= 600 &&
+             data.isMandatory is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
     // 1. User Profile Collection
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId);
@@ -167,6 +180,28 @@ service cloud.firestore {
 
         allow delete: if isOwner(userId) && isValidId(userId) && isValidId(historyId);
       }
+    }
+
+    // 5. Global Admin Broadcasts (Notifications & OTA App Updates from Web Admin Panel)
+    match /broadcasts/{broadcastId} {
+      allow get: if isSignedIn() && isValidId(broadcastId);
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidId(broadcastId) &&
+                       incoming().keys().hasAll(['senderId', 'type', 'title', 'message', 'targetVersion', 'actionUrl', 'isMandatory', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['senderId', 'senderEmail', 'type', 'title', 'message', 'targetVersion', 'actionUrl', 'isMandatory', 'createdAt', 'updatedAt']) &&
+                       isValidAdminBroadcast(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(broadcastId) &&
+                       existing().senderId == request.auth.uid &&
+                       incoming().senderId == existing().senderId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidAdminBroadcast(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'message', 'targetVersion', 'actionUrl', 'isMandatory', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(broadcastId) && existing().senderId == request.auth.uid;
     }
   }
 }

@@ -13,6 +13,8 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -43,6 +45,8 @@ data class PlaybackUiState(
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
     val currentPositionMs: Long = 0L,
+    val bufferedPositionMs: Long = 0L,
+    val bufferedPercentage: Int = 0,
     val durationMs: Long = 0L,
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatModeState = RepeatModeState.OFF,
@@ -107,7 +111,16 @@ class SolarAudioController(
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
+        val httpDataSource = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
+        val defaultDataSource = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSource)
+        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(defaultDataSource)
         val exo = ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
@@ -129,11 +142,21 @@ class SolarAudioController(
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 val buffering = playbackState == Player.STATE_BUFFERING
-                val dur = targetPlayer.duration.takeIf { it > 0 } ?: _playbackState.value.currentTrack?.durationMs ?: 0L
+                val trackDur = _playbackState.value.currentTrack?.durationMs ?: 0L
+                val playerDur = targetPlayer.duration
+                val dur = when {
+                    trackDur >= 30_000L -> trackDur
+                    playerDur > 0L -> playerDur
+                    else -> trackDur
+                }
+                val bufPos = targetPlayer.bufferedPosition.coerceIn(0L, dur.coerceAtLeast(1L))
+                val bufPct = targetPlayer.bufferedPercentage.coerceIn(0, 100)
                 _playbackState.update {
                     it.copy(
                         isBuffering = buffering,
-                        durationMs = dur
+                        durationMs = dur,
+                        bufferedPositionMs = bufPos,
+                        bufferedPercentage = bufPct
                     )
                 }
             }
@@ -223,18 +246,51 @@ class SolarAudioController(
         positionPollJob = scope.launch {
             while (isActive) {
                 val p = player
-                if (p != null && p.isPlaying) {
+                if (p != null && _playbackState.value.currentTrack != null) {
                     val pos = p.currentPosition.coerceAtLeast(0L)
-                    val dur = p.duration.takeIf { it > 0 } ?: _playbackState.value.durationMs
+                    val trackDur = _playbackState.value.currentTrack?.durationMs ?: 0L
+                    val playerDur = p.duration
+                    val dur = when {
+                        trackDur >= 30_000L -> trackDur
+                        playerDur > 0L -> playerDur
+                        else -> _playbackState.value.durationMs
+                    }
+                    val rawBufPos = p.bufferedPosition.coerceAtLeast(pos)
+                    val bufPct = p.bufferedPercentage.coerceIn(0, 100)
+                    val computedBufPos = if (dur > 0L) {
+                        maxOf(rawBufPos, (dur * bufPct) / 100L).coerceIn(pos, dur)
+                    } else {
+                        rawBufPos
+                    }
                     _playbackState.update {
                         it.copy(
-                            currentPositionMs = pos,
+                            currentPositionMs = if (p.isPlaying) pos else it.currentPositionMs,
+                            bufferedPositionMs = computedBufPos,
+                            bufferedPercentage = bufPct,
                             durationMs = dur
                         )
                     }
                 }
-                delay(400L)
+                delay(250L)
             }
+        }
+    }
+
+    fun setLoadingTrack(track: SolarTrack, queueContext: List<SolarTrack> = listOf(track)) {
+        val activeQueue = if (queueContext.isNotEmpty()) queueContext else listOf(track)
+        val startIndex = activeQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+        _playbackState.update {
+            it.copy(
+                currentTrack = track,
+                queue = activeQueue,
+                currentQueueIndex = startIndex,
+                currentPositionMs = 0L,
+                bufferedPositionMs = (track.durationMs * 8L) / 100L,
+                bufferedPercentage = 8,
+                durationMs = track.durationMs,
+                isBuffering = true,
+                errorMessage = null
+            )
         }
     }
 
@@ -248,8 +304,11 @@ class SolarAudioController(
                 queue = activeQueue,
                 currentQueueIndex = startIndex,
                 currentPositionMs = 0L,
+                bufferedPositionMs = (track.durationMs * 12L) / 100L,
+                bufferedPercentage = 12,
                 durationMs = track.durationMs,
                 isPlaying = true,
+                isBuffering = true,
                 errorMessage = null
             )
         }
@@ -496,10 +555,26 @@ class SolarAudioController(
             .setArtworkUri(runCatching { Uri.parse(artworkUrl) }.getOrNull())
             .build()
 
-        return MediaItem.Builder()
+        val rawUri = if (streamUrl.isNotBlank()) {
+            streamUrl
+        } else {
+            com.example.data.provider.FullStreamDecryptionHelper.LEGACY_OFFICIAL_STREAM
+        }
+        val finalUri = if (rawUri.startsWith("/")) {
+            Uri.fromFile(java.io.File(rawUri))
+        } else {
+            Uri.parse(rawUri)
+        }
+
+        val builder = MediaItem.Builder()
             .setMediaId(id)
-            .setUri(streamUrl)
+            .setUri(finalUri)
             .setMediaMetadata(metadata)
-            .build()
+
+        if (rawUri.contains(".m3u8")) {
+            builder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+        }
+
+        return builder.build()
     }
 }

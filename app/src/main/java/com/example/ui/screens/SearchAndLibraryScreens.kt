@@ -22,22 +22,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.ImportExport
 import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
@@ -75,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import com.example.domain.model.DownloadItem
 import com.example.domain.model.DownloadStatus
 import com.example.domain.model.PlaylistImportReport
+import com.example.domain.model.SolarAlbum
 import com.example.domain.model.SolarPlaylist
 import com.example.domain.model.SolarTrack
 import com.example.ui.SearchUiState
@@ -108,7 +115,8 @@ fun SolarSearchScreen(
     onPlayNext: (SolarTrack) -> Unit,
     onAddToQueue: (SolarTrack) -> Unit,
     onAddToPlaylistRequest: (SolarTrack) -> Unit,
-    onDownloadTrack: (SolarTrack) -> Unit
+    onDownloadTrack: (SolarTrack) -> Unit,
+    onOpenAlbumDetail: (SolarAlbum) -> Unit = {}
 ) {
     val filters = listOf("All", "Songs", "Albums", "Artists", "Local")
 
@@ -218,23 +226,25 @@ fun SolarSearchScreen(
             }
         }
 
-        // Suggestions & Recent Searches when query is empty
+        // Recent Searches when query is empty
         if (searchState.query.isBlank()) {
-            if (searchState.searchHistory.isNotEmpty()) {
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Recent Searches", style = MaterialTheme.typography.titleMedium, color = SolarWhite)
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Recent Searches", style = MaterialTheme.typography.titleMedium, color = SolarWhite)
+                    if (searchState.searchHistory.isNotEmpty()) {
                         TextButton(onClick = onClearHistory) {
                             Text("Clear All", color = SolarBurntOrange)
                         }
                     }
                 }
+            }
+            if (searchState.searchHistory.isNotEmpty()) {
                 items(searchState.searchHistory) { histQuery ->
                     Row(
                         modifier = Modifier
@@ -254,53 +264,9 @@ fun SolarSearchScreen(
                         }
                     }
                 }
-            }
-
-            item {
-                SectionTitle("Trending Searches", "Tap to search official masters")
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(searchState.trendingSearches) { trending ->
-                        Surface(
-                            modifier = Modifier.clickable { onSubmitSearch(trending) },
-                            color = SolarCardBackground,
-                            shape = RoundedCornerShape(20.dp)
-                        ) {
-                            Text(
-                                text = trending,
-                                color = SolarWarmAmber,
-                                style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            // Instant Autocomplete Suggestions
-            if (searchState.suggestions.isNotEmpty()) {
+            } else {
                 item {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(searchState.suggestions) { suggestion ->
-                            Surface(
-                                modifier = Modifier.clickable { onSubmitSearch(suggestion) },
-                                color = SolarElevatedSurface,
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text(
-                                    text = suggestion,
-                                    color = SolarWarmAmber,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
-                    }
+                    EmptyLibraryBox("Your recent search history will appear here.")
                 }
             }
         }
@@ -318,85 +284,84 @@ fun SolarSearchScreen(
             }
         }
 
-        // Artist Results
-        if ((searchState.selectedFilter == "All" || searchState.selectedFilter == "Artists") &&
-            searchState.artistResults.isNotEmpty()
-        ) {
-            item {
-                SectionTitle("Verified Artists", null)
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(searchState.artistResults) { artist ->
-                        SolarArtistBubble(
-                            artist = artist,
-                            onClick = {
-                                val first = artist.topTracks.firstOrNull()
-                                if (first != null) onPlayTrack(first, artist.topTracks)
-                            }
+        if (searchState.query.isNotBlank()) {
+            // 1. Track Results first
+            if (searchState.selectedFilter in listOf("All", "Songs", "Local")) {
+                val filteredTracks = if (searchState.selectedFilter == "Local") {
+                    searchState.trackResults.filter { it.provider.name == "LOCAL" }
+                } else {
+                    searchState.trackResults
+                }
+
+                if (filteredTracks.isNotEmpty()) {
+                    item {
+                        SectionTitle(
+                            title = "Tracks (${filteredTracks.size})",
+                            subtitle = null
                         )
+                    }
+
+                    items(filteredTracks, key = { "search_${it.id}" }) { track ->
+                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            SolarTrackRow(
+                                track = track,
+                                isPlaying = currentPlayingTrack?.id == track.id,
+                                isLiked = likedTrackIds.contains(track.id),
+                                onPlayClick = {
+                                    onSubmitSearch(searchState.query)
+                                    onPlayTrack(track, filteredTracks)
+                                },
+                                onLikeClick = { onToggleLike(track) },
+                                onPlayNext = { onPlayNext(track) },
+                                onAddToQueue = { onAddToQueue(track) },
+                                onAddToPlaylist = { onAddToPlaylistRequest(track) },
+                                onDownloadClick = { onDownloadTrack(track) },
+                                showAccuracyBadge = false,
+                                showProviderBadge = false
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // Album Results
-        if ((searchState.selectedFilter == "All" || searchState.selectedFilter == "Albums") &&
-            searchState.albumResults.isNotEmpty()
-        ) {
-            item {
-                SectionTitle("Matching Albums", null)
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(searchState.albumResults) { album ->
-                        SolarAlbumCard(
-                            album = album,
-                            onClick = {
-                                val first = album.tracks.firstOrNull()
-                                if (first != null) onPlayTrack(first, album.tracks)
-                            }
-                        )
+            // 2. Album Results second
+            if ((searchState.selectedFilter == "All" || searchState.selectedFilter == "Albums") &&
+                searchState.albumResults.isNotEmpty()
+            ) {
+                item {
+                    SectionTitle("Matching Albums", null)
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(searchState.albumResults) { album ->
+                            SolarAlbumCard(
+                                album = album,
+                                onClick = { onOpenAlbumDetail(album) }
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // Track Results
-        if (searchState.selectedFilter in listOf("All", "Songs", "Local")) {
-            val filteredTracks = if (searchState.selectedFilter == "Local") {
-                searchState.trackResults.filter { it.provider.name == "LOCAL" }
-            } else {
-                searchState.trackResults
-            }
-
-            item {
-                SectionTitle(
-                    title = if (searchState.query.isBlank()) "Featured Songs" else "Tracks (${filteredTracks.size})",
-                    subtitle = null
-                )
-            }
-
-            items(filteredTracks, key = { "search_${it.id}" }) { track ->
-                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    SolarTrackRow(
-                        track = track,
-                        isPlaying = currentPlayingTrack?.id == track.id,
-                        isLiked = likedTrackIds.contains(track.id),
-                        onPlayClick = {
-                            onSubmitSearch(searchState.query)
-                            onPlayTrack(track, filteredTracks)
-                        },
-                        onLikeClick = { onToggleLike(track) },
-                        onPlayNext = { onPlayNext(track) },
-                        onAddToQueue = { onAddToQueue(track) },
-                        onAddToPlaylist = { onAddToPlaylistRequest(track) },
-                        onDownloadClick = { onDownloadTrack(track) },
-                        showAccuracyBadge = false,
-                        showProviderBadge = false
-                    )
+            // 3. Artist Results (only when explicitly filtering by Artists)
+            if (searchState.selectedFilter == "Artists" && searchState.artistResults.isNotEmpty()) {
+                item {
+                    SectionTitle("Verified Artists", null)
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(searchState.artistResults) { artist ->
+                            SolarArtistBubble(
+                                artist = artist,
+                                onClick = {
+                                    val first = artist.topTracks.firstOrNull()
+                                    if (first != null) onPlayTrack(first, artist.topTracks)
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -431,29 +396,19 @@ fun SolarLibraryScreen(
     onDeleteDownload: (String) -> Unit,
     onClearHistory: () -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf("Playlists") }
-    val tabs = listOf("Playlists", "Liked Songs", "Local Files", "Downloads", "History")
+    var activeDetailView by remember { mutableStateOf<String?>(null) } // null = main list, "Playlists", "Liked Songs", "Downloads"
 
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showImportPlaylistDialog by remember { mutableStateOf(false) }
     var selectedPlaylistForDetail by remember { mutableStateOf<SolarPlaylist?>(null) }
     var qrSharePlaylist by remember { mutableStateOf<SolarPlaylist?>(null) }
     var exportedM3uPreview by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var localSortBy by remember { mutableStateOf("Title") }
-
-    val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.READ_MEDIA_AUDIO
-    } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { _ ->
-        onScanLocalMusic()
-    }
 
     val likedIds = remember(likedTracks) { likedTracks.map { it.id }.toSet() }
+
+    BackHandler(enabled = activeDetailView != null) {
+        activeDetailView = null
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -461,384 +416,363 @@ fun SolarLibraryScreen(
             .testTag("library_screen_list"),
         contentPadding = PaddingValues(bottom = 140.dp)
     ) {
-        item {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text(
-                    text = "Your Library",
-                    style = MaterialTheme.typography.displayMedium,
-                    color = SolarWhite
-                )
-                Text(
-                    text = "Playlists, Cloud Favorites, Offline Downloads & Local MediaStore Audio",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SolarMutedGrey
-                )
-            }
-        }
-
-        // Library Category Tabs
-        item {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(tabs) { tab ->
-                    val active = selectedTab == tab
-                    FilterChip(
-                        selected = active,
-                        onClick = { selectedTab = tab },
-                        label = { Text(tab) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = SolarBurntOrange,
-                            selectedLabelColor = SolarWhite,
-                            containerColor = SolarCardBackground,
-                            labelColor = SolarMutedGrey
-                        )
+        if (activeDetailView == null) {
+            // Main Library View: Clean vertical layout (stacked above to below)
+            item {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(
+                        text = "Your Library",
+                        style = MaterialTheme.typography.displayMedium,
+                        color = SolarWhite
+                    )
+                    Text(
+                        text = "Playlists, Liked Songs & Offline Downloads",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SolarMutedGrey
                     )
                 }
             }
-        }
 
-        when (selectedTab) {
-            "Playlists" -> {
-                item {
+            // 1. Playlists Card (Above)
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .clickable { activeDetailView = "Playlists" },
+                    colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Button(
-                            onClick = { showCreatePlaylistDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = SolarBurntOrange),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("create_playlist_btn")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = SolarWhite)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Create Playlist", color = SolarWhite)
-                        }
-                        OutlinedButton(
-                            onClick = { showImportPlaylistDialog = true },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("import_playlist_btn")
-                        ) {
-                            Icon(Icons.Default.ImportExport, contentDescription = null, tint = SolarWarmAmber)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Import YT / M3U", color = SolarWarmAmber)
-                        }
-                    }
-                }
-
-                items(playlists, key = { it.id }) { pl ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                            .clickable { selectedPlaylistForDetail = pl },
-                        colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(SolarElevatedSurface),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(pl.name, style = MaterialTheme.typography.titleMedium, color = SolarWhite)
-                                    Text(
-                                        "${pl.tracks.size} tracks • Origin: ${pl.sourceOrigin} • ${if (pl.isPublic) "Public" else "Private"}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = SolarWarmAmber
-                                    )
-                                    if (pl.description.isNotBlank()) {
-                                        Text(
-                                            pl.description,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = SolarMutedGrey,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                                IconButton(
-                                    onClick = {
-                                        val first = pl.tracks.firstOrNull()
-                                        if (first != null) onPlayTrack(first, pl.tracks)
-                                    }
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = "Play Playlist", tint = SolarBurntOrange)
-                                }
+                                Icon(Icons.Default.QueueMusic, contentDescription = "Playlists", tint = SolarBurntOrange)
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                TextButton(onClick = { onDuplicatePlaylist(pl) }) {
-                                    Icon(Icons.Default.ContentCopy, null, tint = SolarMutedGrey, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Duplicate", color = SolarMutedGrey)
-                                }
-                                if (playlists.size > 1) {
-                                    TextButton(
-                                        onClick = {
-                                            val other = playlists.firstOrNull { it.id != pl.id }
-                                            if (other != null) onMergePlaylists(pl, other)
-                                        }
-                                    ) {
-                                        Icon(Icons.Default.MergeType, null, tint = SolarMutedGrey, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Merge", color = SolarMutedGrey)
-                                    }
-                                }
-                                TextButton(onClick = { qrSharePlaylist = pl }) {
-                                    Icon(Icons.Default.QrCode2, null, tint = SolarWarmAmber, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("QR", color = SolarWarmAmber)
-                                }
-                                TextButton(onClick = { exportedM3uPreview = pl.name to onExportPlaylistM3u(pl) }) {
-                                    Text("M3U", color = SolarWarmAmber)
-                                }
-                                TextButton(onClick = { onDeletePlaylist(pl.id) }) {
-                                    Icon(Icons.Default.Delete, null, tint = SolarMutedGrey, modifier = Modifier.size(16.dp))
-                                }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text("Playlists", style = MaterialTheme.typography.titleMedium, color = SolarWhite)
+                                Text("${playlists.size} playlists", style = MaterialTheme.typography.bodySmall, color = SolarMutedGrey)
                             }
                         }
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Open Playlists", tint = SolarMutedGrey)
                     }
                 }
             }
 
-            "Liked Songs" -> {
-                item {
-                    SectionTitle(
-                        title = "Liked Songs (${likedTracks.size})",
-                        subtitle = "Synchronized with SOLAR Cloud & available across devices"
+            // 2. Liked Songs Card (Middle)
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .clickable { activeDetailView = "Liked Songs" },
+                    colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(SolarElevatedSurface),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Favorite, contentDescription = "Liked Songs", tint = SolarWarmAmber)
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text("Liked Songs", style = MaterialTheme.typography.titleMedium, color = SolarWhite)
+                                Text("${likedTracks.size} saved songs", style = MaterialTheme.typography.bodySmall, color = SolarMutedGrey)
+                            }
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Open Liked Songs", tint = SolarMutedGrey)
+                    }
+                }
+            }
+
+            // 3. Downloads Card (Below)
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .clickable { activeDetailView = "Downloads" },
+                    colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(SolarElevatedSurface),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.DownloadDone, contentDescription = "Downloads", tint = SolarBurntOrange)
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text("Downloads", style = MaterialTheme.typography.titleMedium, color = SolarWhite)
+                                Text("${downloads.size} offline tracks", style = MaterialTheme.typography.bodySmall, color = SolarMutedGrey)
+                            }
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Open Downloads", tint = SolarMutedGrey)
+                    }
+                }
+            }
+        } else {
+            // Dedicated Detail Page with Navigation Back Header
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { activeDetailView = null }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Library", tint = SolarWhite)
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = activeDetailView ?: "",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = SolarWhite
                     )
                 }
-                if (likedTracks.isEmpty()) {
-                    item {
-                        EmptyLibraryBox("Tap the heart icon on any track to add it to your Liked Songs.")
-                    }
-                } else {
-                    items(likedTracks, key = { "liked_${it.id}" }) { track ->
-                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            SolarTrackRow(
-                                track = track,
-                                isPlaying = currentPlayingTrack?.id == track.id,
-                                isLiked = true,
-                                onPlayClick = { onPlayTrack(track, likedTracks) },
-                                onLikeClick = { onToggleLike(track) },
-                                onPlayNext = { onPlayNext(track) },
-                                onAddToQueue = { onAddToQueue(track) },
-                                onAddToPlaylist = { onAddToPlaylistRequest(track) },
-                                onDownloadClick = { onStartDownload(track) }
-                            )
-                        }
-                    }
-                }
             }
 
-            "Local Files" -> {
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+            when (activeDetailView) {
+                "Playlists" -> {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = { showCreatePlaylistDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = SolarBurntOrange),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("create_playlist_btn")
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Local MediaStore Scanner", style = MaterialTheme.typography.titleMedium, color = SolarWhite)
-                                    Text(
-                                        "Supports MP3, FLAC, WAV, AAC, M4A, OGG & OPUS",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = SolarWarmAmber
-                                    )
-                                }
-                                Button(
-                                    onClick = { permissionLauncher.launch(audioPermission) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = SolarBurntOrange)
-                                ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = SolarWhite)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Scan Device", color = SolarWhite)
-                                }
+                                Icon(Icons.Default.Add, contentDescription = null, tint = SolarWhite)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Create Playlist", color = SolarWhite)
                             }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            OutlinedButton(
+                                onClick = { showImportPlaylistDialog = true },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("import_playlist_btn")
                             ) {
-                                Text("Sort by:", style = MaterialTheme.typography.labelSmall, color = SolarMutedGrey)
-                                listOf("Title", "Artist", "Duration").forEach { sortKey ->
-                                    FilterChip(
-                                        selected = localSortBy == sortKey,
-                                        onClick = { localSortBy = sortKey },
-                                        label = { Text(sortKey) }
-                                    )
+                                Icon(Icons.Default.ImportExport, contentDescription = null, tint = SolarWarmAmber)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Import YT / M3U", color = SolarWarmAmber)
+                            }
+                        }
+                    }
+
+                    if (playlists.isEmpty()) {
+                        item {
+                            EmptyLibraryBox("No playlists created yet. Tap 'Create Playlist' above to create your first playlist.")
+                        }
+                    } else {
+                        items(playlists, key = { it.id }) { pl ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                                    .clickable { selectedPlaylistForDetail = pl },
+                                colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(pl.name, style = MaterialTheme.typography.titleMedium, color = SolarWhite)
+                                            Text(
+                                                "${pl.tracks.size} tracks • ${if (pl.isPublic) "Public" else "Private"}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = SolarWarmAmber
+                                            )
+                                            if (pl.description.isNotBlank()) {
+                                                Text(
+                                                    pl.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = SolarMutedGrey,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                val first = pl.tracks.firstOrNull()
+                                                if (first != null) onPlayTrack(first, pl.tracks)
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.PlayArrow, contentDescription = "Play Playlist", tint = SolarBurntOrange)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        TextButton(onClick = { onDuplicatePlaylist(pl) }) {
+                                            Icon(Icons.Default.ContentCopy, null, tint = SolarMutedGrey, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Duplicate", color = SolarMutedGrey)
+                                        }
+                                        if (playlists.size > 1) {
+                                            TextButton(
+                                                onClick = {
+                                                    val other = playlists.firstOrNull { it.id != pl.id }
+                                                    if (other != null) onMergePlaylists(pl, other)
+                                                }
+                                            ) {
+                                                Icon(Icons.Default.MergeType, null, tint = SolarMutedGrey, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Merge", color = SolarMutedGrey)
+                                            }
+                                        }
+                                        TextButton(onClick = { qrSharePlaylist = pl }) {
+                                            Icon(Icons.Default.QrCode2, null, tint = SolarWarmAmber, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("QR", color = SolarWarmAmber)
+                                        }
+                                        TextButton(onClick = { exportedM3uPreview = pl.name to onExportPlaylistM3u(pl) }) {
+                                            Text("M3U", color = SolarWarmAmber)
+                                        }
+                                        TextButton(onClick = { onDeletePlaylist(pl.id) }) {
+                                            Icon(Icons.Default.Delete, null, tint = SolarMutedGrey, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                val sortedLocal = when (localSortBy) {
-                    "Artist" -> localTracks.sortedBy { it.artist }
-                    "Duration" -> localTracks.sortedByDescending { it.durationMs }
-                    else -> localTracks.sortedBy { it.title }
-                }
-
-                val folders = localTracks.mapNotNull { it.localFolderPath }.distinct()
-                if (folders.isNotEmpty()) {
-                    item {
-                        SectionTitle("Device Audio Folders", "Tap to hide/exclude folder")
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(folders) { folder ->
-                                FilterChip(
-                                    selected = !hiddenFolders.contains(folder),
-                                    onClick = { onToggleHiddenFolder(folder) },
-                                    leadingIcon = { Icon(Icons.Default.Folder, null, tint = SolarWarmAmber) },
-                                    label = { Text(folder) }
+                "Liked Songs" -> {
+                    if (likedTracks.isEmpty()) {
+                        item {
+                            EmptyLibraryBox("Tap the heart icon on any track to add it to your Liked Songs.")
+                        }
+                    } else {
+                        items(likedTracks, key = { "liked_${it.id}" }) { track ->
+                            Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                                SolarTrackRow(
+                                    track = track,
+                                    isPlaying = currentPlayingTrack?.id == track.id,
+                                    isLiked = true,
+                                    onPlayClick = { onPlayTrack(track, likedTracks) },
+                                    onLikeClick = { onToggleLike(track) },
+                                    onPlayNext = { onPlayNext(track) },
+                                    onAddToQueue = { onAddToQueue(track) },
+                                    onAddToPlaylist = { onAddToPlaylistRequest(track) },
+                                    onDownloadClick = { onStartDownload(track) }
                                 )
                             }
                         }
                     }
                 }
 
-                if (sortedLocal.isEmpty()) {
-                    item {
-                        EmptyLibraryBox("No local audio files scanned yet. Tap 'Scan Device' above to index device MP3/FLAC/WAV files.")
-                    }
-                } else {
-                    items(sortedLocal, key = { it.id }) { track ->
-                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            SolarTrackRow(
-                                track = track,
-                                isPlaying = currentPlayingTrack?.id == track.id,
-                                isLiked = likedIds.contains(track.id),
-                                onPlayClick = { onPlayTrack(track, sortedLocal) },
-                                onLikeClick = { onToggleLike(track) },
-                                onPlayNext = { onPlayNext(track) },
-                                onAddToQueue = { onAddToQueue(track) },
-                                onAddToPlaylist = { onAddToPlaylistRequest(track) },
-                                onDownloadClick = {}
-                            )
+                "Downloads" -> {
+                    if (downloads.isEmpty()) {
+                        item {
+                            EmptyLibraryBox("No offline downloads yet. Open any track menu and select 'Download Offline'.")
                         }
-                    }
-                }
-            }
-
-            "Downloads" -> {
-                val totalBytes = downloads.sumOf { it.downloadedBytes }
-                val totalMb = "%.1f MB".format(totalBytes / (1024f * 1024f))
-                item {
-                    SectionTitle(
-                        title = "Offline Downloads (${downloads.size})",
-                        subtitle = "Storage used: $totalMb • Permitted offline tracks"
-                    )
-                }
-                if (downloads.isEmpty()) {
-                    item {
-                        EmptyLibraryBox("No offline downloads yet. Open any track menu and select 'Download Offline'.")
-                    }
-                } else {
-                    items(downloads, key = { "dl_${it.track.id}" }) { item ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 5.dp)
-                                .clickable { onPlayTrack(item.track, downloads.map { it.track }) },
-                            colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(item.track.title, style = MaterialTheme.typography.titleSmall, color = SolarWhite)
-                                        Text(
-                                            "${item.track.artist} • ${item.quality.label} • ${item.status.name}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = SolarWarmAmber
-                                        )
-                                    }
-                                    Row {
-                                        if (item.status == DownloadStatus.COMPLETED) {
-                                            Icon(
-                                                Icons.Default.DownloadDone,
-                                                contentDescription = "Downloaded",
-                                                tint = SolarBurntOrange,
-                                                modifier = Modifier.padding(8.dp)
+                    } else {
+                        items(downloads, key = { "dl_${it.track.id}" }) { item ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 5.dp)
+                                    .clickable { onPlayTrack(item.track, downloads.map { it.track }) },
+                                colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(item.track.title, style = MaterialTheme.typography.titleSmall, color = SolarWhite)
+                                            Text(
+                                                text = if (item.status == DownloadStatus.COMPLETED) {
+                                                    "${item.track.artist} • Offline"
+                                                } else {
+                                                    "${item.track.artist} • Downloading"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = SolarMutedGrey
                                             )
                                         }
-                                        IconButton(onClick = { onDeleteDownload(item.track.id) }) {
-                                            Icon(Icons.Default.Delete, contentDescription = "Delete Download", tint = SolarMutedGrey)
+                                        Row {
+                                            if (item.status == DownloadStatus.COMPLETED) {
+                                                Icon(
+                                                    Icons.Default.DownloadDone,
+                                                    contentDescription = "Downloaded",
+                                                    tint = SolarBurntOrange,
+                                                    modifier = Modifier.padding(8.dp)
+                                                )
+                                            }
+                                            IconButton(onClick = { onDeleteDownload(item.track.id) }) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete Download", tint = SolarMutedGrey)
+                                            }
                                         }
                                     }
-                                }
-                                if (item.status == DownloadStatus.DOWNLOADING) {
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    LinearProgressIndicator(
-                                        progress = { item.progressPercent / 100f },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = SolarBurntOrange
-                                    )
+                                    if (item.status == DownloadStatus.DOWNLOADING) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        LinearProgressIndicator(
+                                            progress = { item.progressPercent / 100f },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = SolarBurntOrange
+                                        )
+                                    }
                                 }
                             }
-                        }
-                    }
-                }
-            }
-
-            "History" -> {
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Listening History (${history.size})", style = MaterialTheme.typography.titleLarge, color = SolarWhite)
-                        if (history.isNotEmpty()) {
-                            TextButton(onClick = onClearHistory) {
-                                Text("Clear History", color = SolarBurntOrange)
-                            }
-                        }
-                    }
-                }
-                if (history.isEmpty()) {
-                    item {
-                        EmptyLibraryBox("Your recently played songs will appear here automatically.")
-                    }
-                } else {
-                    items(history, key = { "hist_${it.id}_${it.hashCode()}" }) { track ->
-                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            SolarTrackRow(
-                                track = track,
-                                isPlaying = currentPlayingTrack?.id == track.id,
-                                isLiked = likedIds.contains(track.id),
-                                onPlayClick = { onPlayTrack(track, history) },
-                                onLikeClick = { onToggleLike(track) },
-                                onPlayNext = { onPlayNext(track) },
-                                onAddToQueue = { onAddToQueue(track) },
-                                onAddToPlaylist = { onAddToPlaylistRequest(track) },
-                                onDownloadClick = { onStartDownload(track) }
-                            )
                         }
                     }
                 }
@@ -911,27 +845,58 @@ fun SolarLibraryScreen(
             containerColor = SolarCardBackground,
             title = { Text("Import External Playlist", color = SolarWhite) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("YOUTUBE_MUSIC", "JIOSAAVN", "M3U").forEach { src ->
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Import from Spotify, YouTube Music, or M3U link",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SolarWarmAmber
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(listOf("Spotify URL", "YouTube URL", "Playlist URL", "M3U / Text List")) { src ->
                             FilterChip(
                                 selected = selectedSource == src,
-                                onClick = { selectedSource = src },
-                                label = { Text(src) }
+                                onClick = {
+                                    selectedSource = src
+                                    if (src == "Spotify URL") {
+                                        rawLines = "https://open.spotify.com/playlist/"
+                                    } else if (src == "YouTube URL") {
+                                        rawLines = "https://music.youtube.com/playlist?list="
+                                    }
+                                },
+                                label = { Text(src) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = SolarBurntOrange,
+                                    selectedLabelColor = SolarWhite,
+                                    containerColor = SolarElevatedSurface,
+                                    labelColor = SolarMutedGrey
+                                )
                             )
                         }
                     }
                     OutlinedTextField(
                         value = playlistTitle,
                         onValueChange = { playlistTitle = it },
-                        label = { Text("Target Playlist Name") },
-                        singleLine = true
+                        label = { Text("Playlist Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
                         value = rawLines,
                         onValueChange = { rawLines = it },
-                        label = { Text("Paste M3U lines, Track list, or Playlist URL") },
-                        minLines = 3
+                        label = { Text("URL or Track List") },
+                        placeholder = {
+                            Text(
+                                when (selectedSource) {
+                                    "Spotify URL" -> "https://open.spotify.com/playlist/..."
+                                    "YouTube URL" -> "https://music.youtube.com/playlist?list=..."
+                                    "Playlist URL" -> "https://example.com/playlist.m3u"
+                                    else -> "Paste track names or M3U lines"
+                                },
+                                color = SolarMutedGrey
+                            )
+                        },
+                        minLines = 3,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             },

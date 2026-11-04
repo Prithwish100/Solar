@@ -18,8 +18,8 @@ android {
     applicationId = "com.aistudio.solarmusic.prthws"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 7
+    versionName = "1.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -130,6 +130,7 @@ dependencies {
   // implementation(libs.firebase.appcheck.recaptcha)
   // implementation(libs.firebase.appcheck.debug)
   implementation(libs.androidx.media3.exoplayer)
+  implementation(libs.androidx.media3.exoplayer.hls)
   implementation(libs.androidx.media3.session)
   implementation(libs.androidx.media3.common)
   implementation(libs.androidx.media3.ui)

@@ -33,12 +33,16 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LibraryMusic
@@ -55,6 +59,8 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -82,22 +88,28 @@ import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.domain.model.SolarAlbum
 import com.example.domain.model.SolarTrack
 import com.example.ui.SolarViewModel
 import com.example.ui.components.SolarGeometricLogo
 import com.example.ui.components.SolarLogoWithCredit
 import com.example.ui.components.SolarMiniPlayer
+import com.example.ui.screens.SolarAlbumDetailScreen
+import com.example.ui.screens.SolarAppUpdateDialog
 import com.example.ui.screens.SolarExploreScreen
 import com.example.ui.screens.SolarFullScreenPlayer
 import com.example.ui.screens.SolarHomeScreen
 import com.example.ui.screens.SolarLibraryScreen
+import com.example.ui.screens.SolarLiveNotificationBanner
 import com.example.ui.screens.SolarSearchScreen
 import com.example.ui.screens.SolarSettingsAndAccountScreen
+import com.example.ui.screens.SolarWebAdminScreen
 import com.example.ui.screens.attemptSolarAutoSignIn
 import com.example.ui.screens.onSolarGoogleSignInClicked
 import com.example.ui.theme.SolarBurntOrange
 import com.example.ui.theme.SolarCardBackground
 import com.example.ui.theme.SolarDeepBlack
+import com.example.ui.theme.SolarDivider
 import com.example.ui.theme.SolarElevatedSurface
 import com.example.ui.theme.SolarMutedGrey
 import com.example.ui.theme.SolarPrimaryOrange
@@ -115,7 +127,6 @@ enum class SolarNavDestination(
     val unselectedIcon: ImageVector
 ) {
     HOME("home", "Home", Icons.Filled.Home, Icons.Outlined.Home),
-    EXPLORE("explore", "Explore", Icons.Filled.Explore, Icons.Outlined.Explore),
     SEARCH("search", "Search", Icons.Filled.Search, Icons.Outlined.Search),
     LIBRARY("library", "Library", Icons.Filled.LibraryMusic, Icons.Outlined.LibraryMusic)
 }
@@ -311,6 +322,13 @@ fun SolarAuthGateScreen(
                     Text(stringResource(R.string.continue_as_guest), color = SolarWarmAmber)
                 }
 
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Version 1.7",
+                    color = SolarMutedGrey,
+                    style = MaterialTheme.typography.labelMedium
+                )
+
                 errorMsg?.let {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(it, color = SolarWarmAmber, style = MaterialTheme.typography.labelSmall)
@@ -337,25 +355,42 @@ fun SolarMainScaffold(
     val localTracks by viewModel.localTracks.collectAsStateWithLifecycle()
     val downloads by viewModel.downloads.collectAsStateWithLifecycle()
     val history by viewModel.listeningHistory.collectAsStateWithLifecycle()
-    val listeningStats by viewModel.listeningStats.collectAsStateWithLifecycle()
     val activeLyrics by viewModel.activeLyrics.collectAsStateWithLifecycle()
     val isLoadingLyrics by viewModel.isLoadingLyrics.collectAsStateWithLifecycle()
     val lastImportReport by viewModel.lastImportReport.collectAsStateWithLifecycle()
     val statusBanner by viewModel.statusBannerMessage.collectAsStateWithLifecycle()
+    val selectedAlbumForDetail by viewModel.selectedAlbumForDetail.collectAsStateWithLifecycle()
+    val adminBroadcasts by viewModel.adminBroadcasts.collectAsStateWithLifecycle()
+    val activeNotificationBroadcast by viewModel.activeNotificationBroadcast.collectAsStateWithLifecycle()
+    val activeAppUpdateBroadcast by viewModel.activeAppUpdateBroadcast.collectAsStateWithLifecycle()
 
     var currentDestination by rememberSaveable { mutableStateOf(SolarNavDestination.HOME) }
     var showSettingsScreen by rememberSaveable { mutableStateOf(false) }
+    var showWebAdminPanel by rememberSaveable { mutableStateOf(false) }
     var isPlayerExpanded by rememberSaveable { mutableStateOf(false) }
     var trackPendingPlaylistAdd by remember { mutableStateOf<SolarTrack?>(null) }
     var lastHomeBackPressMs by remember { mutableLongStateOf(0L) }
 
     val likedIds = remember(likedTracks) { likedTracks.map { it.id }.toSet() }
+    val effectiveUserName = remember(settings.userName, currentUser) {
+        when {
+            settings.userName.isNotBlank() -> settings.userName
+            !currentUser?.displayName.isNullOrBlank() -> currentUser?.displayName?.split(" ")?.firstOrNull() ?: ""
+            else -> ""
+        }
+    }
 
-    // Requirement 18: Back Navigation & Double-Back-to-Exit without interrupting music playback
+    // Back Navigation & Double-Back-to-Exit without interrupting music playback
     BackHandler {
         when {
             isPlayerExpanded -> {
                 isPlayerExpanded = false
+            }
+            showWebAdminPanel -> {
+                showWebAdminPanel = false
+            }
+            selectedAlbumForDetail != null -> {
+                viewModel.closeAlbumDetail()
             }
             showSettingsScreen -> {
                 showSettingsScreen = false
@@ -418,11 +453,20 @@ fun SolarMainScaffold(
                         val progress = if (playbackState.currentTrack != null) {
                             (playbackState.currentPositionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
                         } else 0f
+                        val bufferedFrac = if (playbackState.currentTrack != null) {
+                            maxOf(
+                                (playbackState.bufferedPositionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
+                                (playbackState.bufferedPercentage / 100f).coerceIn(0f, 1f),
+                                progress
+                            )
+                        } else 0f
 
                         SolarMiniPlayer(
                             track = activeTrack,
                             isPlaying = playbackState.isPlaying,
+                            isBuffering = playbackState.isBuffering && playbackState.currentTrack != null,
                             progressFraction = progress,
+                            bufferedFraction = bufferedFrac,
                             isLiked = likedIds.contains(activeTrack.id),
                             onTogglePlayPause = {
                                 if (playbackState.currentTrack == null) {
@@ -447,11 +491,13 @@ fun SolarMainScaffold(
                         tonalElevation = 0.dp
                     ) {
                         SolarNavDestination.entries.forEach { dest ->
-                            val selected = !showSettingsScreen && currentDestination == dest
+                            val selected = !showSettingsScreen && !showWebAdminPanel && selectedAlbumForDetail == null && currentDestination == dest
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = {
                                     showSettingsScreen = false
+                                    showWebAdminPanel = false
+                                    viewModel.closeAlbumDetail()
                                     currentDestination = dest
                                 },
                                 icon = {
@@ -480,7 +526,38 @@ fun SolarMainScaffold(
                     .fillMaxSize()
                     .padding(top = innerPadding.calculateTopPadding())
             ) {
-                if (showSettingsScreen) {
+                val activeAlbum = selectedAlbumForDetail
+                if (showWebAdminPanel) {
+                    SolarWebAdminScreen(
+                        broadcasts = adminBroadcasts,
+                        onBack = { showWebAdminPanel = false },
+                        onSendNotification = { title, message ->
+                            viewModel.sendAdminNotification(title, message)
+                        },
+                        onSendAppUpdate = { version, title, notes, downloadUrl, mandatory ->
+                            viewModel.sendAdminAppUpdate(version, title, notes, downloadUrl, mandatory)
+                        },
+                        onDeleteBroadcast = { viewModel.deleteAdminBroadcast(it) }
+                    )
+                } else if (activeAlbum != null) {
+                    SolarAlbumDetailScreen(
+                        album = activeAlbum,
+                        currentPlayingTrack = playbackState.currentTrack,
+                        likedTrackIds = likedIds,
+                        onBack = { viewModel.closeAlbumDetail() },
+                        onPlayTrack = { track, q -> viewModel.playTrack(track, q) },
+                        onShufflePlay = { tracks ->
+                            val shuffled = tracks.shuffled()
+                            val first = shuffled.firstOrNull()
+                            if (first != null) viewModel.playTrack(first, shuffled)
+                        },
+                        onToggleLike = { viewModel.toggleLikeTrack(it) },
+                        onPlayNext = { viewModel.playNextInQueue(it) },
+                        onAddToQueue = { viewModel.addToQueue(it) },
+                        onAddToPlaylist = { trackPendingPlaylistAdd = it },
+                        onDownloadTrack = { viewModel.startDownload(it) }
+                    )
+                } else if (showSettingsScreen) {
                     SolarSettingsAndAccountScreen(
                         currentUser = currentUser,
                         settings = settings,
@@ -503,7 +580,8 @@ fun SolarMainScaffold(
                         onSetJioSaavnEnabled = { viewModel.setJioSaavnEnabled(it) },
                         onSetPersonalizationEnabled = { viewModel.setPersonalizationEnabled(it) },
                         onClearCache = { viewModel.clearImageAndAudioCache() },
-                        onClearHistory = { viewModel.clearListeningHistory() }
+                        onClearHistory = { viewModel.clearListeningHistory() },
+                        onOpenWebAdminPanel = { showWebAdminPanel = true }
                     )
                 } else {
                     when (currentDestination) {
@@ -513,7 +591,7 @@ fun SolarMainScaffold(
                                 currentPlayingTrack = playbackState.currentTrack,
                                 likedTrackIds = likedIds,
                                 localTracks = localTracks,
-                                userName = currentUser?.displayName?.split(" ")?.firstOrNull() ?: "Prithwish",
+                                userName = effectiveUserName,
                                 isCloudSignedIn = currentUser != null,
                                 onSelectMood = { viewModel.selectMoodFilter(it) },
                                 onRefresh = { viewModel.loadInitialData() },
@@ -524,26 +602,8 @@ fun SolarMainScaffold(
                                 onAddToPlaylistRequest = { trackPendingPlaylistAdd = it },
                                 onDownloadTrack = { viewModel.startDownload(it) },
                                 onNavigateToSearch = { currentDestination = SolarNavDestination.SEARCH },
-                                onNavigateToSettings = { showSettingsScreen = true }
-                            )
-                        }
-
-                        SolarNavDestination.EXPLORE -> {
-                            SolarExploreScreen(
-                                homeState = homeState,
-                                listeningStats = listeningStats,
-                                currentPlayingTrack = playbackState.currentTrack,
-                                likedTrackIds = likedIds,
-                                onPlayTrack = { track, q -> viewModel.playTrack(track, q) },
-                                onToggleLike = { viewModel.toggleLikeTrack(it) },
-                                onPlayNext = { viewModel.playNextInQueue(it) },
-                                onAddToQueue = { viewModel.addToQueue(it) },
-                                onAddToPlaylistRequest = { trackPendingPlaylistAdd = it },
-                                onDownloadTrack = { viewModel.startDownload(it) },
-                                onSelectMoodAndPlay = { _, tracks ->
-                                    val first = tracks.firstOrNull()
-                                    if (first != null) viewModel.playTrack(first, tracks)
-                                }
+                                onNavigateToSettings = { showSettingsScreen = true },
+                                onOpenAlbumDetail = { viewModel.openAlbumDetail(it) }
                             )
                         }
 
@@ -563,7 +623,8 @@ fun SolarMainScaffold(
                                 onPlayNext = { viewModel.playNextInQueue(it) },
                                 onAddToQueue = { viewModel.addToQueue(it) },
                                 onAddToPlaylistRequest = { trackPendingPlaylistAdd = it },
-                                onDownloadTrack = { viewModel.startDownload(it) }
+                                onDownloadTrack = { viewModel.startDownload(it) },
+                                onOpenAlbumDetail = { viewModel.openAlbumDetail(it) }
                             )
                         }
 
@@ -641,6 +702,29 @@ fun SolarMainScaffold(
                 )
             }
         }
+
+        // Live Web Admin Broadcast Notification Banner at Top of Screen
+        activeNotificationBroadcast?.let { notifBroadcast ->
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .align(Alignment.TopCenter)
+            ) {
+                SolarLiveNotificationBanner(
+                    broadcast = notifBroadcast,
+                    onDismiss = { viewModel.dismissActiveNotificationBroadcast() }
+                )
+            }
+        }
+
+        // Live Web Admin OTA App Update Dialog
+        activeAppUpdateBroadcast?.let { updateBroadcast ->
+            SolarAppUpdateDialog(
+                updateBroadcast = updateBroadcast,
+                onDismiss = { viewModel.dismissActiveAppUpdateBroadcast() }
+            )
+        }
     }
 
     // Add Track to Playlist Picker Modal
@@ -686,5 +770,124 @@ fun SolarMainScaffold(
                 }
             }
         )
+    }
+
+    // First-Launch Aesthetic Minimal User Name Prompt Modal
+    if (!settings.hasPromptedForName) {
+        var inputName by remember { mutableStateOf("") }
+        Dialog(
+            onDismissRequest = { viewModel.skipNamePrompt() },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(SolarDeepBlack.copy(alpha = 0.85f))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("name_prompt_modal"),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = CardDefaults.cardColors(containerColor = SolarCardBackground),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SolarDivider)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(SolarBurntOrange.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Headphones,
+                                contentDescription = null,
+                                tint = SolarWarmAmber,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        Text(
+                            text = "Welcome to SOLAR",
+                            color = SolarWhite,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = "What should we call you?",
+                            color = SolarMutedGrey,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        OutlinedTextField(
+                            value = inputName,
+                            onValueChange = { inputName = it },
+                            placeholder = { Text("Your name (optional)", color = SolarMutedGrey) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = SolarWhite,
+                                unfocusedTextColor = SolarWhite,
+                                focusedBorderColor = SolarBurntOrange,
+                                unfocusedBorderColor = SolarDivider,
+                                focusedContainerColor = SolarElevatedSurface,
+                                unfocusedContainerColor = SolarElevatedSurface
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("name_prompt_input")
+                        )
+
+                        Spacer(modifier = Modifier.height(22.dp))
+
+                        Button(
+                            onClick = { viewModel.saveUserName(inputName.trim()) },
+                            colors = ButtonDefaults.buttonColors(containerColor = SolarBurntOrange),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("name_prompt_save_btn")
+                        ) {
+                            Text(
+                                text = "Get Started",
+                                color = SolarWhite,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        TextButton(
+                            onClick = { viewModel.skipNamePrompt() },
+                            modifier = Modifier.testTag("name_prompt_cancel_btn")
+                        ) {
+                            Text(
+                                text = "Skip for now",
+                                color = SolarMutedGrey,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }

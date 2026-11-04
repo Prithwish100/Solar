@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>SOLAR Web Admin Panel • v1.7</title>
+  <style>
+    :root {
+      --bg: #080808;
+      --card: #141414;
+      --elevated: #1E1E1E;
+      --border: #2A2A2A;
+      --orange: #FF5500;
+      --amber: #FFB347;
+      --text: #FFFFFF;
+      --muted: #9E9E9E;
+      --success: #2ECC71;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 16px; min-height: 100vh; }
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      background: linear-gradient(135deg, rgba(255,85,0,0.22), rgba(20,20,20,0.95));
+      border: 1px solid var(--border); border-radius: 18px; padding: 16px 18px; margin-bottom: 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .orb {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, var(--amber), var(--orange), #141414);
+      box-shadow: 0 0 16px rgba(255,85,0,0.45);
+    }
+    .brand h1 { font-size: 18px; letter-spacing: 1.5px; font-weight: 800; }
+    .brand p { font-size: 11px; color: var(--amber); margin-top: 2px; }
+    .badge {
+      background: rgba(46, 204, 113, 0.16); color: var(--success);
+      border: 1px solid rgba(46, 204, 113, 0.4); padding: 5px 10px;
+      border-radius: 999px; font-size: 11px; font-weight: 700;
+    }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab-btn {
+      flex: 1; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--border);
+      background: var(--card); color: var(--muted); font-weight: 700; font-size: 13px;
+      cursor: pointer; transition: all 0.18s ease;
+    }
+    .tab-btn.active {
+      background: var(--orange); color: var(--text); border-color: var(--orange);
+      box-shadow: 0 4px 14px rgba(255,85,0,0.35);
+    }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 18px; padding: 18px; margin-bottom: 16px;
+    }
+    .card h2 { font-size: 15px; margin-bottom: 4px; color: var(--text); }
+    .card .sub { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+    label { display: block; font-size: 12px; color: var(--amber); font-weight: 600; margin-bottom: 6px; margin-top: 12px; }
+    input, textarea, select {
+      width: 100%; padding: 11px 13px; border-radius: 12px;
+      border: 1px solid var(--border); background: var(--elevated);
+      color: var(--text); font-size: 13px; outline: none;
+    }
+    input:focus, textarea:focus { border-color: var(--orange); }
+    textarea { min-height: 78px; resize: vertical; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .chip {
+      background: var(--elevated); border: 1px solid var(--border); color: var(--muted);
+      padding: 5px 10px; border-radius: 999px; font-size: 11px; cursor: pointer;
+    }
+    .chip:hover, .chip:active { border-color: var(--amber); color: var(--amber); }
+    .row { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+    .btn-primary {
+      width: 100%; margin-top: 16px; padding: 13px; border-radius: 14px;
+      border: none; background: linear-gradient(90deg, var(--orange), #FF7700);
+      color: var(--text); font-weight: 800; font-size: 14px; cursor: pointer;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+      box-shadow: 0 6px 18px rgba(255,85,0,0.32);
+    }
+    .btn-primary:active { transform: scale(0.97); }
+    .toast {
+      display: none; background: rgba(46, 204, 113, 0.18); border: 1px solid var(--success);
+      color: #fff; padding: 11px 14px; border-radius: 12px; font-size: 12px;
+      margin-bottom: 14px; font-weight: 600;
+    }
+    .log-item {
+      background: var(--elevated); border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px; margin-top: 10px;
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+    }
+    .log-tag {
+      display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 7px;
+      border-radius: 6px; background: rgba(255,85,0,0.2); color: var(--amber); margin-bottom: 4px;
+    }
+    .log-title { font-size: 13px; font-weight: 700; color: var(--text); }
+    .log-msg { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .del-btn {
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      border-radius: 8px; padding: 5px 8px; font-size: 11px; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">
+      <div class="orb"></div>
+      <div>
+        <h1>SOLAR ADMIN</h1>
+        <p>Direct User Notification & OTA Update Console • v1.7</p>
+      </div>
+    </div>
+    <span class="badge">LIVE CLOUD</span>
+  </div>
+
+  <div id="statusToast" class="toast"></div>
+
+  <div class="tabs">
+    <button id="tabNotifBtn" class="tab-btn active" onclick="switchTab('notif')">Push Notification</button>
+    <button id="tabUpdateBtn" class="tab-btn" onclick="switchTab('update')">Push App Update</button>
+  </div>
+
+  <!-- Notification Panel -->
+  <div id="notifPanel" class="card">
+    <h2>Send Direct Notification to Users</h2>
+    <p class="sub">Delivers an instant system push notification, in-app banner, and Firestore live broadcast.</p>
+
+    <div class="chips">
+      <span class="chip" onclick="fillPreset('New Trending Tracks Added', 'Stream the latest full-length 320kbps hits on SOLAR now!')">Preset: New Hits</span>
+      <span class="chip" onclick="fillPreset('SOLAR v1.7 Welcome', 'Faster search, buffered progress bar, and smooth animations are now live.')">Preset: v1.7 Welcome</span>
+      <span class="chip" onclick="fillPreset('Server Optimization Complete', 'Enjoy ultra-fast song search and uninterrupted full-length playback.')">Preset: Server Status</span>
+    </div>
+
+    <label>Notification Title</label>
+    <input id="notifTitle" type="text" placeholder="e.g. New Featured Songs Available!" value="SOLAR v1.7 Live Announcement" />
+
+    <label>Notification Message</label>
+    <textarea id="notifMessage" placeholder="Write the message to display directly on users' screens...">Enjoy faster song search, buffered songbar progress, and full-length 320kbps playback!</textarea>
+
+    <button class="btn-primary" onclick="sendNotification()">Send Notification Now</button>
+  </div>
+
+  <!-- App Update Panel -->
+  <div id="updatePanel" class="card" style="display:none;">
+    <h2>Push Direct App Update (OTA)</h2>
+    <p class="sub">Prompts connected users with an interactive Update Available dialog and changelog.</p>
+
+    <label>New Version Number</label>
+    <input id="updateVersion" type="text" placeholder="e.g. 1.7 or 1.8" value="1.7" />
+
+    <label>Update Headline</label>
+    <input id="updateTitle" type="text" placeholder="e.g. SOLAR v1.7 Major Update" value="SOLAR Version 1.7 Update" />
+
+    <label>Release Notes / Changelog</label>
+    <textarea id="updateNotes">• Buffered loading bar in player & mini-player
+• Smooth spring animations on all buttons
+• Instant full-length song duration sync
+• Real-time Admin Notification & Update engine</textarea>
+
+    <label>APK / Update URL (Optional)</label>
+    <input id="updateUrl" type="text" placeholder="https://..." value="https://ais-pre-xxxmvtn7rbbjkrnl2742qs-362368487838.asia-southeast1.run.app/SOLAR-v1.7-debug.apk" />
+
+    <div class="row">
+      <span style="font-size:13px; color:#fff; font-weight:600;">Mandatory Update Prompt</span>
+      <input id="updateMandatory" type="checkbox" style="width:20px; height:20px;" />
+    </div>
+
+    <button class="btn-primary" onclick="sendAppUpdate()">Push Update to Users</button>
+  </div>
+
+  <!-- Sent Broadcasts History -->
+  <div class="card">
+    <h2>Recent Live Broadcasts</h2>
+    <p class="sub">Real-time notifications and updates dispatched to users</p>
+    <div id="broadcastList">
+      <div class="log-item">
+        <div>
+          <span class="log-tag">SYSTEM READY</span>
+          <div class="log-title">SOLAR Web Admin Panel v1.7 Connected</div>
+          <div class="log-msg">Use the console above to push instant notifications or OTA updates to all users.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tab) {
+      document.getElementById('notifPanel').style.display = tab === 'notif' ? 'block' : 'none';
+      document.getElementById('updatePanel').style.display = tab === 'update' ? 'block' : 'none';
+      document.getElementById('tabNotifBtn').className = tab === 'notif' ? 'tab-btn active' : 'tab-btn';
+      document.getElementById('tabUpdateBtn').className = tab === 'update' ? 'tab-btn active' : 'tab-btn';
+    }
+
+    function fillPreset(title, msg) {
+      document.getElementById('notifTitle').value = title;
+      document.getElementById('notifMessage').value = msg;
+    }
+
+    function showToast(text) {
+      var t = document.getElementById('statusToast');
+      t.innerText = text;
+      t.style.display = 'block';
+      setTimeout(function() { t.style.display = 'none'; }, 4000);
+    }
+
+    function prependLog(type, title, message, version) {
+      var list = document.getElementById('broadcastList');
+      var item = document.createElement('div');
+      item.className = 'log-item';
+      item.innerHTML = '<div><span class="log-tag">' + type + (version ? ' • v' + version : '') + '</span>' +
+        '<div class="log-title">' + escapeHtml(title) + '</div>' +
+        '<div class="log-msg">' + escapeHtml(message) + '</div></div>';
+      list.insertBefore(item, list.firstChild);
+    }
+
+    function escapeHtml(s) {
+      return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function sendNotification() {
+      var title = document.getElementById('notifTitle').value.trim() || 'SOLAR Notification';
+      var message = document.getElementById('notifMessage').value.trim() || 'New update from SOLAR Admin.';
+      if (window.SolarAdminBridge && window.SolarAdminBridge.sendNotification) {
+        window.SolarAdminBridge.sendNotification(title, message);
+      } else {
+        fetch('/api/broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'NOTIFICATION', title: title, message: message, targetVersion: '1.7', actionUrl: '', isMandatory: false })
+        }).catch(function(){});
+      }
+      prependLog('NOTIFICATION', title, message, '1.7');
+      showToast('Notification "' + title + '" delivered to users!');
+    }
+
+    function sendAppUpdate() {
+      var version = document.getElementById('updateVersion').value.trim() || '1.7';
+      var title = document.getElementById('updateTitle').value.trim() || ('SOLAR v' + version + ' Update');
+      var notes = document.getElementById('updateNotes').value.trim() || 'Bug fixes and performance improvements.';
+      var url = document.getElementById('updateUrl').value.trim() || '';
+      var mandatory = document.getElementById('updateMandatory').checked;
+      if (window.SolarAdminBridge && window.SolarAdminBridge.sendAppUpdate) {
+        window.SolarAdminBridge.sendAppUpdate(version, title, notes, url, mandatory);
+      } else {
+        fetch('/api/broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'APP_UPDATE', title: title, message: notes, targetVersion: version, actionUrl: url, isMandatory: mandatory })
+        }).catch(function(){});
+      }
+      prependLog('APP UPDATE', title, notes, version);
+      showToast('App Update v' + version + ' pushed directly to users!');
+    }
+  </script>
+</body>
+</html>

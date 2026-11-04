@@ -1,16 +1,20 @@
 package com.example.ui.components
 
-import android.content.Intent
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +45,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -64,14 +69,16 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.domain.model.RecordingType
 import com.example.domain.model.SolarAlbum
@@ -93,6 +100,34 @@ import kotlin.math.abs
  * Original abstract geometric solar-inspired application logo with orange/black composition
  * and mandatory "Made by Prithwish" developer credit underneath.
  */
+@Composable
+fun SolarAnimatedIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.82f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "solar_btn_scale"
+    )
+    IconButton(
+        onClick = onClick,
+        interactionSource = interactionSource,
+        modifier = modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+    ) {
+        content()
+    }
+}
+
 @Composable
 fun SolarLogoWithCredit(
     modifier: Modifier = Modifier,
@@ -260,7 +295,6 @@ fun SolarTrackRow(
     showAccuracyBadge: Boolean = false,
     showProviderBadge: Boolean = false
 ) {
-    val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
     var showDetailsDialog by remember { mutableStateOf(false) }
 
@@ -360,41 +394,15 @@ fun SolarTrackRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    if (showProviderBadge) {
-                        Surface(
-                            color = SolarDeepBlack,
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = track.provider.badgeLabel,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = SolarWarmAmber,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
                     Text(
                         text = formatDuration(track.durationMs),
                         style = MaterialTheme.typography.labelSmall,
                         color = SolarMutedGrey
                     )
-                    if (showAccuracyBadge) {
-                        Surface(
-                            color = SolarPrimaryOrange.copy(alpha = 0.22f),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = "${track.accuracyScore}% MATCH • ${track.recordingType.label}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = SolarBurntOrange,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
                 }
             }
 
-            IconButton(
+            SolarAnimatedIconButton(
                 onClick = onLikeClick,
                 modifier = Modifier.testTag("like_btn_${track.id}")
             ) {
@@ -406,7 +414,7 @@ fun SolarTrackRow(
             }
 
             Box {
-                IconButton(
+                SolarAnimatedIconButton(
                     onClick = { menuExpanded = true },
                     modifier = Modifier.testTag("more_btn_${track.id}")
                 ) {
@@ -457,22 +465,7 @@ fun SolarTrackRow(
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text("Share Track", color = SolarWhite) },
-                        leadingIcon = { Icon(Icons.Default.Share, null, tint = SolarMutedGrey) },
-                        onClick = {
-                            menuExpanded = false
-                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(
-                                    Intent.EXTRA_TEXT,
-                                    "Listening to \"${track.title}\" by ${track.artist} on SOLAR Music (Made by Prithwish)"
-                                )
-                            }
-                            context.startActivity(Intent.createChooser(sendIntent, "Share Song"))
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Song Details & Codec", color = SolarWhite) },
+                        text = { Text("Song Details", color = SolarWhite) },
                         leadingIcon = { Icon(Icons.Default.MusicNote, null, tint = SolarMutedGrey) },
                         onClick = {
                             menuExpanded = false
@@ -489,18 +482,15 @@ fun SolarTrackRow(
             onDismissRequest = { showDetailsDialog = false },
             containerColor = SolarCardBackground,
             title = {
-                Text("Recording & Codec Metadata", color = SolarWhite, style = MaterialTheme.typography.titleLarge)
+                Text("Song Details", color = SolarWhite, style = MaterialTheme.typography.titleLarge)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Title: ${track.title}", color = SolarWhite)
-                    Text("Artist: ${track.artist} (Verified: ${if (track.isVerifiedArtist) "Yes" else "No"})", color = SolarMutedGrey)
-                    Text("Album: ${track.album} (${track.releaseYear})", color = SolarMutedGrey)
-                    Text("Recording Type: ${track.recordingType.label}", color = SolarWarmAmber)
-                    Text("Source Provider: ${track.provider.displayName}", color = SolarBurntOrange)
-                    Text("Audio Stream Format: ${track.audioFormat}", color = SolarMutedGrey)
+                    Text("Artist: ${track.artist}", color = SolarMutedGrey)
+                    Text("Album: ${track.album}", color = SolarMutedGrey)
+                    Text("Genre: ${track.genre}", color = SolarMutedGrey)
                     Text("Duration: ${formatDuration(track.durationMs)}", color = SolarMutedGrey)
-                    Text("ReplayGain Normalization: ${track.replayGainDb} dB", color = SolarMutedGrey)
                 }
             },
             confirmButton = {
@@ -634,7 +624,9 @@ fun SolarPlaylistCard(
 fun SolarMiniPlayer(
     track: SolarTrack,
     isPlaying: Boolean,
+    isBuffering: Boolean = false,
     progressFraction: Float,
+    bufferedFraction: Float = 0f,
     isLiked: Boolean,
     onTogglePlayPause: () -> Unit,
     onSkipNext: () -> Unit,
@@ -676,31 +668,40 @@ fun SolarMiniPlayer(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "${track.artist} • ${track.audioFormat}",
+                        text = if (isBuffering) "Loading stream • ${track.artist}" else track.artist,
                         style = MaterialTheme.typography.bodySmall,
-                        color = SolarWarmAmber,
+                        color = if (isBuffering) SolarWarmAmber else SolarMutedGrey,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                IconButton(onClick = onToggleLike) {
+                SolarAnimatedIconButton(onClick = onToggleLike) {
                     Icon(
                         imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = "Favorite",
                         tint = if (isLiked) SolarBurntOrange else SolarMutedGrey
                     )
                 }
-                IconButton(
+                SolarAnimatedIconButton(
                     onClick = onTogglePlayPause,
                     modifier = Modifier.testTag("mini_player_play_pause")
                 ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = SolarWhite
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        if (isBuffering) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                color = SolarWarmAmber,
+                                strokeWidth = 2.dp
+                            )
+                        }
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            tint = SolarWhite
+                        )
+                    }
                 }
-                IconButton(
+                SolarAnimatedIconButton(
                     onClick = onSkipNext,
                     modifier = Modifier.testTag("mini_player_next")
                 ) {
@@ -711,14 +712,34 @@ fun SolarMiniPlayer(
                     )
                 }
             }
-            LinearProgressIndicator(
-                progress = { progressFraction.coerceIn(0f, 1f) },
+            // Dual-layer songbar: faded color shows how much of the song is loaded/buffered, solid orange shows played
+            val clampedProgress = progressFraction.coerceIn(0f, 1f)
+            val clampedBuffered = bufferedFraction.coerceIn(clampedProgress, 1f)
+            Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(2.5.dp),
-                color = SolarBurntOrange,
-                trackColor = SolarDeepBlack
-            )
+                    .height(3.5.dp)
+            ) {
+                // 1. Unloaded background track
+                drawRect(
+                    color = SolarDeepBlack,
+                    size = size
+                )
+                // 2. Faded buffered/loaded track
+                if (clampedBuffered > 0f) {
+                    drawRect(
+                        color = SolarWarmAmber.copy(alpha = 0.42f),
+                        size = Size(size.width * clampedBuffered, size.height)
+                    )
+                }
+                // 3. Active played track
+                if (clampedProgress > 0f) {
+                    drawRect(
+                        color = SolarBurntOrange,
+                        size = Size(size.width * clampedProgress, size.height)
+                    )
+                }
+            }
         }
     }
 }
